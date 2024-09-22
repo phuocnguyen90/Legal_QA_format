@@ -1,0 +1,25 @@
+# config.yaml
+
+provider: google_gemini  # Options: groq, google_gemini
+
+groq:
+  api_key: "YOUR_GROQ_API_KEY"
+  model_name: "llama3-70b-8192"
+  temperature: 0.7
+  max_output_tokens: 4096
+  # Add other Groq-specific settings if necessary
+
+google_gemini:
+  api_key: "YOUR_GEMINI_API_KEY"
+  model_name: "gemini-1.5-flash"
+  temperature: 1
+  top_p: 0.95
+  top_k: 64
+  max_output_tokens: 8192
+  # Add other Google Gemini-specific settings if necessary
+
+processing:
+  input_file: "data.txt"
+  output_file: "processed_data.txt"
+  log_file: "processing.log"
+  delay_between_requests: 1  # in seconds
