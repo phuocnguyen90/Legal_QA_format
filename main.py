@@ -1,174 +1,99 @@
 # main.py
 
 import os
-import re
+import json
 import logging
 import yaml
-import json
-import time
 from tqdm import tqdm
+
 from providers import ProviderFactory
-
-# ------------------------------ Configuration ------------------------------ #
-
-def load_config(config_path='config.yaml'):
-    """
-    Load the YAML configuration file.
-    """
-    try:
-        with open(config_path, 'r', encoding='utf-8') as file:
-            config = yaml.safe_load(file)
-        logging.info(f"Configuration loaded from '{config_path}'.")
-        return config
-    except Exception as e:
-        logging.error(f"Error loading configuration file '{config_path}': {e}")
-        raise
-
-# ------------------------------ Helper Functions ------------------------------ #
-
-def read_data(file_path):
-    """
-    Reads the entire content of the text file.
-    """
-    try:
-        with open(file_path, 'r', encoding='utf-8') as file:
-            data = file.read()
-        logging.info(f"Successfully read data from '{file_path}'.")
-        return data
-    except Exception as e:
-        logging.error(f"Error reading file '{file_path}': {e}")
-        raise
-
-def split_records(data):
-    """
-    Splits the data into individual records using the <id=number></id=number> tags.
-    """
-    # Regular expression pattern to match each record
-    pattern = r'(<id=\d+>.*?</id=\d+>)'
-    
-    # Find all matches with re.DOTALL to include newlines
-    records = re.findall(pattern, data, re.DOTALL)
-    
-    logging.info(f"Total records found: {len(records)}")
-    return records
-
-def save_processed_record(processed_record, output_file):
-    """
-    Appends the processed record to the output file.
-    """
-    try:
-        with open(output_file, 'a', encoding='utf-8') as f:
-            f.write(processed_record + '\n\n')
-        logging.info("Processed record saved successfully.")
-    except Exception as e:
-        logging.error(f"Error saving processed record: {e}")
-
-# ------------------------------ Main Function ------------------------------ #
+from utils.file_handler import (
+    read_input_file,
+    split_into_records,
+    parse_record,
+    write_output_file,
+    append_to_output_file
+)
+from utils.validation import load_schema, validate_record
+from utils.rate_limiter import RateLimiter
+from utils.retry_handler import retry
+from tasks.preprocessing import preprocess_record
+from tasks.postprocessing import postprocess_record
+from utils.logging_setup import setup_logging
 
 def main():
     # Load configuration
+    config_path = 'config/config.yaml'
     try:
-        config = load_config('config.yaml')
-    except Exception:
-        print("Failed to load configuration. Check 'processing.log' for details.")
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+    except Exception as e:
+        print(f"Failed to load configuration: {e}")
         return
 
-    provider_name = config.get('provider', '').strip()
-    if not provider_name:
-        logging.error("API provider not specified in the configuration.")
-        print("API provider not specified in the configuration.")
-        return
+    # Setup logging
+    setup_logging(config['processing']['log_file'])
 
-    # Select the API provider configuration
+    # Initialize API provider
+    provider_name = config['provider']
     provider_config = config.get(provider_name, {})
-    if not provider_config:
-        logging.error(f"No configuration found for provider '{provider_name}'.")
-        print(f"No configuration found for provider '{provider_name}'.")
-        return
-
-    # Define processing requirements
-    requirements = config.get('processing_requirements', """
-- Remove any content that contains Personally Identifiable Information (PII).
-- Remove any part of the text that is not directly related to the title, particularly remove all promotional texts.
-- If possible, rephrase the title inside the <title> tag so that it better generalizes the content inside the <content> tag.
-- If possible, remove all irrelevant, incoherent, or badly formatted texts inside the <content> tag.
-""")
-
-    # Initialize logging
-    logging.basicConfig(
-        filename=config['processing']['log_file'],
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
-    console = logging.StreamHandler()
-    console.setLevel(logging.INFO)
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    console.setFormatter(formatter)
-    logging.getLogger('').addHandler(console)
-
-    # Initialize the API provider using the factory
     try:
-        provider = ProviderFactory.get_provider(provider_name, provider_config, requirements)
+        provider = ProviderFactory.get_provider(provider_name, provider_config, config['tasks']['requirements'])
+        logging.info(f"Initialized provider: {provider_name}")
     except Exception as e:
-        logging.error(f"Error initializing provider '{provider_name}': {e}")
-        print(f"Error initializing provider '{provider_name}'. Check 'processing.log' for details.")
+        logging.error(f"Failed to initialize provider '{provider_name}': {e}")
         return
 
-    # Read input data
-    input_file = config['processing']['input_file']
-    output_file = config['processing']['output_file']
-    delay_between_requests = config['processing'].get('delay_between_requests', 1)
+    # Read and split input data
+    raw_data = read_input_file(config['processing']['input_file'])
+    record_strings = split_into_records(raw_data)
 
-    try:
-        data = read_data(input_file)
-    except Exception:
-        print("Failed to read input data. Check 'processing.log' for details.")
-        return
+    # Load schemas
+    preprocessing_schema = load_schema('config/schemas/preprocessing_schema.yaml')
+    postprocessing_schema = load_schema('config/schemas/postprocessing_schema.yaml')
 
-    # Split data into records
-    records = split_records(data)
-
-    # Verify if records were split correctly
-    if not records:
-        logging.error("No records found. Please check the input file format.")
-        print("No records found. Please check the input file format.")
-        return
-
-    # Clear the output file before processing
-    try:
-        open(output_file, 'w', encoding='utf-8').close()
-        logging.info(f"Cleared existing '{output_file}'.")
-    except Exception as e:
-        logging.error(f"Error clearing '{output_file}': {e}")
-        print(f"Error clearing '{output_file}'. Check 'processing.log' for details.")
-        return
+    # Initialize rate limiter (example: max 60 calls per minute)
+    rate_limiter = RateLimiter(max_calls=60, period=60)
 
     # Process each record
-    total_records = len(records)
-    logging.info(f"Beginning processing of {total_records} records.")
-    print(f"Beginning processing of {total_records} records.")
+    for record_str in tqdm(record_strings, desc="Processing Records"):
+        record = parse_record(record_str)
+        if not record:
+            logging.warning("Skipping malformed record.")
+            continue
 
-    for idx, record in enumerate(tqdm(records, desc="Processing Records"), start=1):
-        logging.info(f"Processing record {idx}/{total_records}.")
-        print(f"Processing record {idx}/{total_records}.")
+        # Preprocessing
+        record = preprocess_record(record)
 
-        # Process the record using the selected API provider
-        processed_data = provider.process_record(record)
+        # API Processing with retry
+        @retry(max_attempts=3, delay=2, backoff=2)
+        def api_process():
+            rate_limiter.wait()
+            return provider.process_record(record)
 
-        if processed_data:
-            # Save the processed record to the output file
-            save_processed_record(processed_data, output_file)
-        else:
-            logging.warning(f"Record {idx} was not processed successfully.")
-            print(f"Record {idx} was not processed successfully.")
+        try:
+            processed_record_str = api_process()
+            if not processed_record_str:
+                logging.warning(f"Record ID {record['id']} not processed.")
+                continue
 
-        # Optional: Sleep to respect API rate limits
-        time.sleep(delay_between_requests)
+            processed_record = json.loads(processed_record_str)
 
-    print(f"Processing complete. Processed data saved to '{output_file}'.")
+            # Postprocessing
+            processed_record = postprocess_record(processed_record)
+
+            # Validation
+            if validate_record(processed_record, postprocessing_schema):
+                # Save processed record
+                append_to_output_file(config['processing']['processed_file'], processed_record)
+            else:
+                logging.warning(f"Processed record ID {processed_record.get('id')} failed validation.")
+
+        except Exception as e:
+            logging.error(f"Failed to process record ID {record.get('id')}: {e}")
+            continue
+
     logging.info("All records processed successfully.")
-
-# ------------------------------ Entry Point ------------------------------ #
 
 if __name__ == "__main__":
     main()
