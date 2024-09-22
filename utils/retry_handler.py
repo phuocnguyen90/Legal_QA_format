@@ -3,7 +3,7 @@
 import time
 import logging
 from functools import wraps
-
+# logging.getLogger(__name__)
 def retry(max_attempts=2, delay=2, backoff=2):
     """
     Decorator to retry a function in case of exceptions.

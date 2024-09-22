@@ -4,6 +4,7 @@ import logging
 import openai
 from providers.api_provider import APIProvider
 
+
 class OpenAIProvider(APIProvider):
     def __init__(self, config, requirements):
         super().__init__(config, requirements)

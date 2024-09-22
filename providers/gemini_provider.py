@@ -6,6 +6,7 @@ import google.generativeai as genai
 from google.ai.generativelanguage_v1beta.types import content
 from providers.api_provider import APIProvider
 
+
 class GeminiProvider(APIProvider):
     def __init__(self, config, requirements):
         super().__init__(config, requirements)

@@ -13,6 +13,7 @@ class APIProvider(ABC):
     @abstractmethod
     def process_record(self, record):
         """
-        Process a single record and return the processed data.
+        Process the record using the API.
+        Must be implemented by subclasses.
         """
-        pass
+        raise NotImplementedError("Subclasses should implement this method.")
