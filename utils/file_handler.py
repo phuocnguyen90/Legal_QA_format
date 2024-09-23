@@ -3,13 +3,13 @@
 import yaml
 import json
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 import re
 import os
 from dotenv import load_dotenv
 from utils.validation import mask_api_key
 from utils.record import Record
-from utils.llm_processor import format_unformatted_text
+
 
 # logging.getLogger(__name__)
 def load_record(raw_input: str, llm_processor, is_formatted: bool = True) -> Optional[Record]:
@@ -96,23 +96,7 @@ def split_into_records(data):
         logging.error(f"Error splitting data into records: {e}")
         return []
 
-def parse_record(record_str):
-    """
-    Parse a single record string into a dictionary.
-    """
-    try:
-        record = {}
-        record['id'] = int(re.search(r'<id=(\d+)>', record_str).group(1))
-        record['title'] = re.search(r'<title>(.*?)</title>', record_str, re.DOTALL).group(1).strip()
-        record['published_date'] = re.search(r'<published_date>(.*?)</published_date>', record_str, re.DOTALL).group(1).strip()
-        categories_str = re.search(r'<categories>(.*?)</categories>', record_str, re.DOTALL).group(1).strip()
-        record['categories'] = re.findall(r'<(.*?)>', categories_str)
-        content = re.search(r'<content>(.*?)</content>', record_str, re.DOTALL).group(1).strip()
-        record['content'] = content
-        return record
-    except Exception as e:
-        logging.error(f"Error parsing record: {e}")
-        return None
+
 
 def write_output_file(file_path, data):
     """

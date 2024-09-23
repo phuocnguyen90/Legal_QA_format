@@ -28,8 +28,9 @@ def main():
     # Initialize Preprocessor
     try:
         preprocessor = Preprocessor(config)
+        logging.info("Preprocessor initialized successfully.")
     except Exception as e:
-        print(f"Failed to initialize Preprocessor: {e}")
+        logging.error(f"Failed to initialize Preprocessor: {e}")
         return
 
     # Define input and output file paths
@@ -38,7 +39,12 @@ def main():
     formatted = config['processing'].get('formatted', True)  # Default to True
 
     # Process all records
-    preprocessor.process_all_records(input_file, output_file, formatted=formatted)
+
+    try:
+        preprocessor.process_all_records(input_file, output_file, formatted=formatted)
+        logging.info("All records processed successfully.")
+    except Exception as e:
+        logging.error(f"Error processing records: {e}")
 
 if __name__ == "__main__":
     main()

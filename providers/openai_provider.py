@@ -3,6 +3,7 @@
 import logging
 import openai
 from providers.api_provider import APIProvider
+from typing import List, Optional, Dict, Any
 
 
 class OpenAIProvider(APIProvider):
@@ -21,13 +22,13 @@ class OpenAIProvider(APIProvider):
         try:
             prompt = f"""Please process the following data according to these requirements:
 
-{self.requirements}
+            {self.requirements}
 
-Here is the data:
+            Here is the data:
 
-{record}
+            {record}
 
-Please provide the processed data in the same format, ensuring that all modifications adhere to the requirements."""
+            Please provide the processed data in the same format, ensuring that all modifications adhere to the requirements."""
 
             response = openai.ChatCompletion.create(
                 model=self.model_name,
@@ -41,3 +42,27 @@ Please provide the processed data in the same format, ensuring that all modifica
         except Exception as e:
             logging.error(f"Error processing record with OpenAIProvider: {e}")
             return None
+        
+    def format_text(self, prompt: str, stop_sequence: Optional[List[str]] = None) -> str:
+            """
+            Format text using OpenAI's Completion API.
+
+            :param prompt: The prompt to send to OpenAI.
+            :param stop_sequence: Optional list of stop sequences to terminate the LLM response.
+            :return: The formatted text returned by OpenAI.
+            """
+            try:
+                response = openai.ChatCompletion.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=500,
+                    n=1,
+                    stop=stop_sequence
+                )
+                formatted_text = response.choices[0].message.content.strip()
+                logging.debug("Received response from OpenAI.")
+                return formatted_text
+            except Exception as e:
+                logging.error(f"OpenAI formatting failed: {e}")
+                return ""

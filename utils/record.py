@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional,Union
 import re
 # logging.getLogger(__name__)
 class Record:
@@ -21,42 +21,16 @@ class Record:
     def from_tagged_text(cls, text: str) -> Optional['Record']:
         """
         Initialize a Record object from tagged text.
-        Example of tagged text:
-        
-        <id=1>
-        <title>Sample Title</title>
-        <published_date>2024-09-22</published_date>
-        <categories><Category1><Category2></categories>
-        <content>
-        Sample content here.
-        </content>
-        </id=1>
-        
+
         :param text: The raw tagged text string.
         :return: Record object or None if parsing fails.
         """
-        try:
-            id_match = re.search(r'<id=(\d+)>', text)
-            title_match = re.search(r'<title>(.*?)</title>', text, re.DOTALL)
-            date_match = re.search(r'<published_date>(.*?)</published_date>', text, re.DOTALL)
-            categories_match = re.search(r'<categories>(.*?)</categories>', text, re.DOTALL)
-            content_match = re.search(r'<content>(.*?)</content>', text, re.DOTALL)
-
-            if not all([id_match, title_match, date_match, categories_match, content_match]):
-                logging.error("Missing one or more required fields in tagged text.")
-                return None
-
-            id = int(id_match.group(1))
-            title = title_match.group(1).strip()
-            published_date = date_match.group(1).strip()
-            categories_str = categories_match.group(1).strip()
-            categories = re.findall(r'<(.*?)>', categories_str)
-            content = content_match.group(1).strip()
-
-            return cls(id, title, published_date, categories, content)
-
-        except Exception as e:
-            logging.error(f"Error parsing tagged text into Record: {e}")
+        record = parse_record(text, return_type="record")
+        if record:
+            logging.info(f"Record ID {record.id} created successfully from tagged text.")
+            return record
+        else:
+            logging.error("Failed to create Record from tagged text.")
             return None
 
     @classmethod
@@ -207,3 +181,69 @@ class Record:
             record_id = self.id if hasattr(self, 'id') else 'N/A'
             logging.error(f"Error in get method for record ID {record_id}: {e}")
             return default
+        
+def parse_record(record_str: str, return_type: str = "record") -> Optional[Union[Record, Dict[str, Any]]]:
+    """
+    Parse a tagged record string into a Record object or a dictionary.
+
+    :param record_str: The raw tagged text string.
+    :param return_type: The type of output desired. 
+                        - "record" (default): Returns a Record object.
+                        - "dict": Returns a dictionary.
+                        - "json": Returns a JSON string.
+    :return: Record object, dictionary, JSON string, or None if parsing fails.
+    """
+    try:
+        # Extract fields using regular expressions
+        id_match = re.search(r'<id=(\d+)>', record_str)
+        title_match = re.search(r'<title>(.*?)</title>', record_str, re.DOTALL)
+        date_match = re.search(r'<published_date>(.*?)</published_date>', record_str, re.DOTALL)
+        categories_match = re.search(r'<categories>(.*?)</categories>', record_str, re.DOTALL)
+        content_match = re.search(r'<content>(.*?)</content>', record_str, re.DOTALL)
+
+        # Validate that all required fields are present
+        if not all([id_match, title_match, date_match, categories_match, content_match]):
+            missing_fields = []
+            if not id_match:
+                missing_fields.append("id")
+            if not title_match:
+                missing_fields.append("title")
+            if not date_match:
+                missing_fields.append("published_date")
+            if not categories_match:
+                missing_fields.append("categories")
+            if not content_match:
+                missing_fields.append("content")
+            logging.error(f"Missing required fields in tagged text: {', '.join(missing_fields)}.")
+            return None
+
+        # Parse extracted values
+        record_id = int(id_match.group(1))
+        title = title_match.group(1).strip()
+        published_date = date_match.group(1).strip()
+        categories_str = categories_match.group(1).strip()
+        categories = re.findall(r'<(.*?)>', categories_str)
+        content = content_match.group(1).strip()
+
+        # Create a dictionary representation
+        record_dict = {
+            "id": record_id,
+            "title": title,
+            "published_date": published_date,
+            "categories": categories,
+            "content": content
+        }
+
+        if return_type == "record":
+            return Record(**record_dict)
+        elif return_type == "dict":
+            return record_dict
+        elif return_type == "json":
+            return json.dumps(record_dict, ensure_ascii=False, indent=2)
+        else:
+            logging.error(f"Invalid return_type '{return_type}' specified. Choose from 'record', 'dict', 'json'.")
+            return None
+
+    except Exception as e:
+        logging.error(f"Error parsing record: {e}")
+        return None

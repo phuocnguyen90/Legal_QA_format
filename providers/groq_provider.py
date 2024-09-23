@@ -89,3 +89,44 @@ class GroqProvider(APIProvider):
         except Exception as e:
             logging.error(f"Error processing record with GroqProvider: {e}")
             return None
+        
+    def format_text(self, prompt: str, stop_sequence: Optional[List[str]] = None) -> str:
+        """
+        Format text using Groq's API.
+
+        :param prompt: The prompt to send to Groq.
+        :param stop_sequence: Optional list of stop sequences to terminate the LLM response.
+        :return: The formatted text returned by Groq.
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=self.temperature,
+                max_tokens=self.max_output_tokens
+            )
+            logging.debug("Received response from Groq.")
+            
+            # Extract content
+            processed_data = response.choices[0].message.content.strip()
+            if not processed_data:
+                logging.error("Empty content received in the response from Groq API.")
+                return ""
+            
+            # Extract JSON from the response content if formatted as JSON
+            json_match = re.search(r'```json\s*(.*?)\s*```', processed_data, re.DOTALL)
+            if json_match:
+                json_content = json_match.group(1).strip()
+                try:
+                    # Ensure the extracted content is valid JSON
+                    processed_json = json.loads(json_content)
+                    return json.dumps(processed_json, ensure_ascii=False)
+                except json.JSONDecodeError as e:
+                    logging.error(f"JSON decoding error in extracted content: {e}")
+                    return ""
+            else:
+                # If not JSON, return as is
+                return processed_data
+        except Exception as e:
+            logging.error(f"Groq formatting failed: {e}")
+            return ""

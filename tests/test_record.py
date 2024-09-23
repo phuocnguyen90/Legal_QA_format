@@ -6,56 +6,79 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.load_config import load_config
-from utils.record import Record
+from utils.record import Record,parse_record
 
-class TestRecordGetMethod(unittest.TestCase):
+class TestParseRecord(unittest.TestCase):
     def setUp(self):
-        self.record = Record(
-            id=1,
-            title="Sample Title",
-            published_date="2024-09-22",
-            categories=["Category1", "Category2", "Category3"],
-            content="Sample content here."
-        )
-        config=load_config
+        self.valid_tagged_text = """
+        <id=1>
+        <title>Sample Title</title>
+        <published_date>2024-09-22</published_date>
+        <categories><Category1><Category2></categories>
+        <content>
+        Sample content here.
+        </content>
+        </id=1>
+        """
+        self.invalid_tagged_text_missing_title = """
+        <id=2>
+        <published_date>2024-10-01</published_date>
+        <categories><CategoryA></categories>
+        <content>
+        Another sample content.
+        </content>
+        </id=2>
+        """
+        self.invalid_tagged_text_malformed = """
+        <id=3>
+        <title>Malformed Title<title>
+        <published_date>2024-10-15</published_date>
+        <categories><CategoryX></categories>
+        <content>
+        Malformed content here.
+        </content>
+        </id=3>
+        """
 
-    def test_get_existing_attribute(self):
-        self.assertEqual(self.record.get('title'), "Sample Title")
+    def test_parse_record_as_record_valid(self):
+        record = parse_record(self.valid_tagged_text, return_type="record")
+        self.assertIsInstance(record, Record)
+        self.assertEqual(record.id, 1)
+        self.assertEqual(record.title, "Sample Title")
+        self.assertEqual(record.published_date, "2024-09-22")
+        self.assertListEqual(record.categories, ["Category1", "Category2"])
+        self.assertEqual(record.content, "Sample content here.")
 
-    def test_get_nonexistent_attribute_with_default(self):
-        self.assertEqual(self.record.get('author', default='Unknown'), 'Unknown')
+    def test_parse_record_as_dict_valid(self):
+        record_dict = parse_record(self.valid_tagged_text, return_type="dict")
+        self.assertIsInstance(record_dict, dict)
+        self.assertEqual(record_dict['id'], 1)
+        self.assertEqual(record_dict['title'], "Sample Title")
+        self.assertEqual(record_dict['published_date'], "2024-09-22")
+        self.assertListEqual(record_dict['categories'], ["Category1", "Category2"])
+        self.assertEqual(record_dict['content'], "Sample content here.")
 
-    def test_get_existing_list_attribute_first_element(self):
-        self.assertEqual(self.record.get('categories', 0), "Category1")
+    def test_parse_record_as_json_valid(self):
+        record_json = parse_record(self.valid_tagged_text, return_type="json")
+        self.assertIsInstance(record_json, str)
+        record = json.loads(record_json)
+        self.assertEqual(record['id'], 1)
+        self.assertEqual(record['title'], "Sample Title")
+        self.assertEqual(record['published_date'], "2024-09-22")
+        self.assertListEqual(record['categories'], ["Category1", "Category2"])
+        self.assertEqual(record['content'], "Sample content here.")
 
-    def test_get_existing_list_attribute_last_element(self):
-        self.assertEqual(self.record.get('categories', 2), "Category3")
+    def test_parse_record_invalid_missing_field(self):
+        record = parse_record(self.invalid_tagged_text_missing_title, return_type="record")
+        self.assertIsNone(record)
 
-    def test_get_list_attribute_out_of_range_with_default(self):
-        self.assertEqual(self.record.get('categories', 5, default='Unknown'), 'Unknown')
+    def test_parse_record_invalid_malformed(self):
+        record = parse_record(self.invalid_tagged_text_malformed, return_type="record")
+        self.assertIsNone(record)
 
-    def test_get_non_list_attribute_with_index(self):
-        self.assertEqual(self.record.get('title', 0, default='Invalid'), 'Invalid')
-
-    def test_get_multiple_indices_on_list_attribute(self):
-        # Assuming categories could be nested lists; in this case, it's not, so should return default
-        self.assertEqual(self.record.get('categories', 0, 1, default='Invalid'), 'Invalid')
-
-    def test_get_with_no_arguments(self):
-        # Should return the attribute value without default
-        self.assertEqual(self.record.get('id'), 1)
-
-    def test_get_with_none_default(self):
-        # If the attribute doesn't exist, return None
-        self.assertIsNone(self.record.get('publisher'))
-
-    def test_get_with_non_integer_index(self):
-        # Non-integer indices should not work; should return default
-        self.assertEqual(self.record.get('categories', 'a', default='Invalid'), 'Invalid')
-
-    def test_get_with_negative_index(self):
-        # Negative indices are not handled; should return default
-        self.assertEqual(self.record.get('categories', -1, default='Invalid'), 'Invalid')
+    def test_parse_record_invalid_return_type(self):
+        record = parse_record(self.valid_tagged_text, return_type="invalid_type")
+        self.assertIsNone(record)
 
 if __name__ == '__main__':
     unittest.main()

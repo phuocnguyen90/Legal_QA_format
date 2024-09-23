@@ -1,14 +1,8 @@
 # pre_processing.py
 
 import logging
-from tqdm import tqdm
 import time
-import yaml
 import json
-import re
-import argparse
-
-
 from typing import List, Optional, Dict, Any
 
 from utils.file_handler import read_input_file, split_into_records, parse_record, save_processed_record, load_record
@@ -17,8 +11,7 @@ from utils.load_config import load_config
 from providers import ProviderFactory  
 from utils.retry_handler import retry
 from utils.record import Record
-from utils.llm_processor import format_unformatted_text
-from utils.llm_client import LLMClient
+from utils.llm_formatter import LLMFormatter
 
 # logging.getLogger(__name__)
 
@@ -40,7 +33,7 @@ class Preprocessor:
             print(f"Failed to load configuration: {e}")
             return
         self.config = config
-        self.llm_client = LLMClient(api_key=self.config.get("OPENAI_API_KEY"))
+        self.llm_client = LLMFormatter(api_key=self.config.get("api_key"))
         self.provider = self.initialize_provider()
 
     def initialize_provider(self):
@@ -113,20 +106,6 @@ class Preprocessor:
         except Exception as e:
             logging.error(f"Failed to process record ID {record.id}: {e}")
             return None
-
-    def preprocess_record(self, record: Record) -> Record:
-        """
-        Apply preprocessing steps to a Record.
-
-        :param record: The Record instance to preprocess.
-        :return: The preprocessed Record instance.
-        """
-        # Placeholder for actual preprocessing logic
-        # For example, removing PII, cleaning text, etc.
-        # Implement the actual preprocessing as needed
-        # Example:
-        # record.content = clean_text(record.content)
-        return record  # Return the record as-is for now
 
     def process_all_records(self, input_file: str, output_file: str, formatted: bool = True):
         """
