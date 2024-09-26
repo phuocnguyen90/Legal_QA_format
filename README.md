@@ -2,7 +2,7 @@
 
 ## Overview
 
-The **Legal QA Preprocessing Microservice** is a crucial component of the larger **Legal QA Chatbot** project. This microservice is designed to format and standardize legal question-and-answer texts, ensuring they are uniformly structured for efficient retrieval and storage. By preprocessing the legal content, it enhances the chatbot's ability to provide accurate and relevant responses to user inquiries.
+The **Legal QA Preprocessing Microservice** is a crucial component of the larger **Vietnamese Legal QA Chatbot** project. This microservice is designed to format and standardize legal question-and-answer texts, ensuring they are uniformly structured for efficient retrieval and storage. By preprocessing the legal content, it enhances the chatbot's ability to provide accurate and relevant responses to user inquiries.
 
 ## Features
 
@@ -19,12 +19,11 @@ The **Legal QA Preprocessing Microservice** is a crucial component of the larger
 
    ```bash
    git clone https://github.com/phuocnguyen90/Legal_QA_format.git
-   cd legal-qa-preprocessing
    ```
 
 2. **Install Dependencies**
 
-   Ensure you have Python 3.8+ installed.
+   Ensure you have Python 3.10+ installed.
 
    ```bash
    pip install -r requirements.txt
