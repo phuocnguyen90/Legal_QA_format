@@ -3,6 +3,7 @@
 import logging
 import json
 from typing import Optional, Dict, Any
+from providers import ProviderFactory  
 from providers.openai_provider import OpenAIProvider
 from providers.groq_provider import GroqProvider
 from providers.api_provider import APIProvider
@@ -26,33 +27,38 @@ class LLMFormatter:
         self.provider = self._initialize_provider()
         logging.info(f"LLMFormatter initialized with provider '{self.provider_name}'.")
 
-    def _initialize_provider(self) -> Optional[APIProvider]:
+    
+    def _initialize_provider(self):
         """
-        Initialize the specified LLM provider.
+        Initialize the API provider based on the configuration.
 
-        :return: An instance of LLMProvider or None if initialization fails.
+        :return: An instance of the API provider.
         """
+        requirements = self.config.get('processing', {}).get('pre_process_requirements', "")
+        provider_name = self.config.get('provider', '').strip()
+        if not provider_name:
+            logging.error("API provider not specified in the configuration.")
+            raise ValueError("API provider not specified in the configuration.")
+
+        provider_config = self.config.get(provider_name, {})
+        if not provider_config:
+            logging.error(f"No configuration found for provider '{provider_name}'.")
+            raise ValueError(f"No configuration found for provider '{provider_name}'.")
+
+        requirements = self.config.get('tasks', {}).get('pre_process_requirements', "")
+        if not requirements:
+            logging.error("No 'pre_process_requirements' found under 'tasks' in configuration.")
+            raise ValueError("No 'pre_process_requirements' found under 'tasks' in configuration.")
+
         try:
-            if self.provider_name == "openai":
-                api_key = self.config.get('openai_api_key') or self.config['api_keys']['openai']
-                model = self.config.get('openai_model', "gpt-3.5-turbo")
-                return OpenAIProvider(api_key=api_key, model=model)
-            
-            elif self.provider_name == "groq":
-                # Assuming 'groq' config is nested under 'providers' in config
-                groq_config = self.config.get('providers', {}).get('groq', {})
-                requirements = self.config.get('processing', {}).get('pre_process_requirements', "")
-                return GroqProvider(config=groq_config, requirements=requirements)
-            
-            else:
-                logging.error(f"Unsupported LLM provider: {self.provider_name}")
-                return None
-        except KeyError as ke:
-            logging.error(f"Missing configuration key: {ke}")
-            return None
+            provider = ProviderFactory.get_provider(provider_name, provider_config, requirements)
+            logging.info(f"Initialized provider: {provider_name}")
+            return provider
         except Exception as e:
-            logging.error(f"Failed to initialize LLM provider '{self.provider_name}': {e}")
-            return None
+            logging.error(f"Failed to initialize provider '{provider_name}': {e}")
+            raise
+
+    
 
     def format_text(self, raw_text: str, mode: str = "tagged", provider: Optional[str] = None) -> str:
         """

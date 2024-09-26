@@ -24,45 +24,59 @@ def load_schema(schema_path):
         logging.error(f"Error loading schema '{schema_path}': {e}")
         raise
 
-def validate_record(record, schema, mode='default', config=None):
+def validate_record(record: Any, schema_path: str, mode: str = 'default', config: Optional[Dict[str, Any]] = None) -> bool:
     """
-    Validate a single record against the provided JSON schema or mode-based requirements.
+    Validate a single record against the provided JSON schema based on the mode.
     
     :param record: The record to validate. Can be a dictionary or a JSON string.
-    :param schema: The JSON schema to validate against (as a dictionary).
+    :param schema_path: Path to the JSON schema file.
     :param mode: Optional mode for validation ("preprocessing", "postprocessing"). Defaults to 'default'.
     :param config: Configuration dictionary loaded by load_config(). Required if mode is specified.
     :return: True if valid, False otherwise.
     """
     try:
-        # Step 1: Determine the validation schema based on mode
+        # Step 1: Load the appropriate schema based on mode
         if mode == 'preprocessing':
             if config is None:
                 logging.error("Configuration must be provided for preprocessing mode.")
                 return False
-            schema = config['tasks'].get('pre_process_requirements')
-            if schema is None:
-                logging.error("pre_process_requirements not found in configuration.")
+            # Load pre_processing_schema.yml
+            schema_full = load_schema('config/schemas/preprocessing_schema.yaml')
+            if schema_full is None:
+                logging.error("Failed to load 'preprocessing_schema.yaml'.")
                 return False
-            requirements = "pre_process_requirements"
-        
+            # Extract the JSON schema part (exclude 'pre_process_requirements')
+            # Assuming 'pre_process_requirements' is a separate key
+            json_schema = {k: v for k, v in schema_full.items() if k != 'pre_process_requirements'}
+            if not json_schema:
+                logging.error("JSON schema not found in 'preprocessing_schema.yaml'.")
+                return False
+
         elif mode == 'postprocessing':
             if config is None:
                 logging.error("Configuration must be provided for postprocessing mode.")
                 return False
-            schema = config['processing'].get('post_process_requirements')
-            if schema is None:
-                logging.error("post_process_requirements not found in configuration.")
+            # Load postprocessing_schema.yml
+            schema_full = load_schema('config/schemas/postprocessing_schema.yml')
+            if schema_full is None:
+                logging.error("Failed to load 'postprocessing_schema.yml'.")
                 return False
-            requirements = "post_process_requirements"
-        
+            # Extract the JSON schema part (exclude 'post_process_requirements' if exists)
+            json_schema = {k: v for k, v in schema_full.items() if k != 'post_process_requirements'}
+            if not json_schema:
+                logging.error("JSON schema not found in 'postprocessing_schema.yml'.")
+                return False
+
         elif mode == 'default':
-            # Use the provided schema
-            pass
+            # Use the provided schema_path directly
+            json_schema = load_schema(schema_path)
+            if json_schema is None:
+                logging.error(f"Failed to load schema from '{schema_path}'.")
+                return False
         else:
             logging.error(f"Invalid mode '{mode}' specified for validation.")
             return False
-        
+
         # Step 2: Ensure record is a dictionary
         if not isinstance(record, dict):
             logging.debug("Record is not a dictionary. Attempting to convert from JSON string.")
@@ -72,24 +86,26 @@ def validate_record(record, schema, mode='default', config=None):
             except json.JSONDecodeError as jde:
                 logging.error(f"Failed to decode JSON for record: {jde.msg}")
                 return False
-        
-        # Step 3: If in preprocessing or postprocessing mode, send to LLM for compliance
-        if mode in ['preprocessing', 'postprocessing']:
+
+        # Step 3: If in postprocessing mode, send to LLM for compliance
+        if mode == 'postprocessing':
             logging.debug(f"Sending record ID {record.get('id', 'N/A')} to LLM for compliance check.")
-            is_compliant = llm_validate(record, schema)
+            # Assuming 'post_process_requirements' exists in the schema_full
+            post_process_requirements = schema_full.get('post_process_requirements', {})
+            is_compliant = llm_validate(record, post_process_requirements, config)
             if not is_compliant:
                 logging.error(f"LLM validation failed for record ID {record.get('id', 'N/A')}.")
                 return False
             logging.debug(f"LLM validation passed for record ID {record.get('id', 'N/A')}.")
-        
-        # Step 4: Validate the record against the schema
-        validate(instance=record, schema=requirements)
-        
+
+        # Step 4: Validate the record against the JSON schema
+        validate(instance=record, schema=json_schema)
+
         # Step 5: Extract 'id' for logging, if available
         record_id = record.get('id', 'N/A')
         logging.info(f"Record ID {record_id} passed validation in mode '{mode}'.")
         return True
-    
+
     except ValidationError as ve:
         # Extract 'id' for logging, if available
         record_id = record.get('id', 'N/A') if isinstance(record, dict) else 'N/A'
@@ -100,6 +116,7 @@ def validate_record(record, schema, mode='default', config=None):
         record_id = record.get('id', 'N/A') if isinstance(record, dict) else 'N/A'
         logging.error(f"Unexpected error during validation for record ID {record_id} in mode '{mode}': {e}")
         return False
+
 
 def mask_api_key(api_key):
     """

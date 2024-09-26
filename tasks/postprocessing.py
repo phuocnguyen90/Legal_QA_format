@@ -7,13 +7,13 @@ import os
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.file_handler import read_input_file, split_into_records, parse_record, save_processed_record, append_to_output_file, load_record
+from utils.file_handler import read_input_file, split_into_records, save_processed_record, append_to_output_file, load_record
 from utils.validation import load_schema, validate_record
 from utils.validation import mask_api_key
 from utils.load_config import load_config
 from providers import ProviderFactory  # Ensure providers are properly structured
 from utils.retry_handler import retry
-from utils.record import Record
+from utils.record import Record, parse_record
 
 # logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ def main_postprocessing():
         print(f"Postprocessing record {idx}/{total_records}")
         
         # Load the Record object
-        record = load_record(raw_record, format_unformatted_text)
+        record = load_record(raw_record, ProviderFactory)
         if not record:
             logging.warning(f"Record {idx} could not be loaded and will be skipped.")
             print(f"Record {idx} could not be loaded and will be skipped.")
