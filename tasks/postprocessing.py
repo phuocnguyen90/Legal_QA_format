@@ -85,17 +85,17 @@ def main_postprocessing():
         
         # Validate Postprocessed Data
         if not validate_record(postprocessed_record.to_dict(), postprocessing_schema):
-            logging.warning(f"Postprocessed record ID {postprocessed_record.id} failed validation.")
-            print(f"Postprocessed record ID {postprocessed_record.id} failed validation.")
+            logging.warning(f"Postprocessed record ID {postprocessed_record.record_id} failed validation.")
+            print(f"Postprocessed record ID {postprocessed_record.record_id} failed validation.")
             continue
         
         # Save postprocessed record
         try:
             append_to_output_file(output_file, postprocessed_record.to_dict())
-            logging.info(f"Record ID {postprocessed_record.id} postprocessed and saved successfully.")
+            logging.info(f"Record ID {postprocessed_record.record_id} postprocessed and saved successfully.")
         except Exception as e:
-            logging.error(f"Failed to save postprocessed record ID {postprocessed_record.id}: {e}")
-            print(f"Failed to save postprocessed record ID {postprocessed_record.id}: {e}")
+            logging.error(f"Failed to save postprocessed record ID {postprocessed_record.record_id}: {e}")
+            print(f"Failed to save postprocessed record ID {postprocessed_record.record_id}: {e}")
             continue
         
     print(f"Postprocessing complete. Final data saved to {output_file}")

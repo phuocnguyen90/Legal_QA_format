@@ -16,8 +16,10 @@ from dotenv import load_dotenv
 from utils.validation import mask_api_key
 from utils.record import Record
 
+# Configure logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# logging.getLogger(__name__)
 def load_record(raw_input: str, llm_processor, is_formatted: bool = True) -> Optional[Record]:
     """
     Load a Record object from raw input, determining the format.
@@ -78,30 +80,77 @@ def read_input_file(file_path):
         logging.error(f"Error reading input file '{file_path}': {e}")
         raise
 
-def split_into_records(data):
+def split_into_records(raw_data: str) -> List[Dict[str, Any]]:
     """
-    Split the raw data into individual records using either <id=number></id=number> tags or JSON objects with an "id" property.
+    Split the raw data into individual records.
+    
+    The function handles:
+    - Tagged records with flexible ID patterns (e.g., <id=QA_01>...</id=QA_01>)
+    - JSON records containing an "id" property
+    - Unformatted text as separate records
+    
+    :param raw_data: The raw input data as a single string.
+    :return: A list of dictionaries, each representing a record with its type and content.
     """
-    try:
-        # Define patterns for tagged text and JSON text
-        tag_pattern = r'<id=\d+>.*?</id=\d+>'
-        json_pattern = r'\{[^{}]*"id"\s*:\s*\d+[^{}]*\}'
-        
-        # Combine both patterns using alternation
-        combined_pattern = f'({tag_pattern})|({json_pattern})'
-        
-        # Find all matches in the data
-        matches = re.finditer(combined_pattern, data, re.DOTALL)
-        
-        # Extract matched strings from the iterator
-        records = [match.group(0) for match in matches]
-        
-        logging.info(f"Split data into {len(records)} records.")
-        return records
-    except Exception as e:
-        logging.error(f"Error splitting data into records: {e}")
-        return []
-
+    records = []
+    
+    # Define patterns for tagged text with flexible ID formats (e.g., QA_01, DOC_03)
+    tag_pattern = r'<id=([A-Za-z]{2,3}_[0-9]+)>.*?</id=\1>'
+    
+    # Define pattern for JSON objects containing an "id" property (flexible ID formats)
+    json_pattern = r'\{[^{}]*"id"\s*:\s*"([A-Za-z]{2,3}_[0-9]+)"[^{}]*\}'
+    
+    # Find all tagged records
+    tagged_matches = re.finditer(tag_pattern, raw_data, re.DOTALL)
+    for match in tagged_matches:
+        full_match = match.group(0)
+        record_id = match.group(1)
+        content = re.sub(r'^<id=[A-Za-z]{2,3}_[0-9]+>|</id=[A-Za-z]{2,3}_[0-9]+>$', '', full_match, flags=re.DOTALL).strip()
+        records.append({
+            "type": "tagged",
+            "id": record_id,
+            "content": content
+        })
+        logger.debug(f"Extracted tagged record with ID: {record_id}")
+    
+    # Remove tagged records from raw_data to prevent overlapping matches
+    raw_data_cleaned = re.sub(tag_pattern, '', raw_data, flags=re.DOTALL)
+    
+    # Find all JSON records
+    json_matches = re.finditer(json_pattern, raw_data_cleaned, re.DOTALL)
+    for match in json_matches:
+        full_match = match.group(0)
+        record_id = match.group(1)
+        try:
+            json_obj = json.loads(full_match)
+            records.append({
+                "type": "json",
+                "id": record_id,
+                "content": json_obj
+            })
+            logger.debug(f"Extracted JSON record with ID: {record_id}")
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decoding error for record ID {record_id}: {e}")
+            continue
+    
+    # Remove JSON records from raw_data_cleaned
+    raw_data_cleaned = re.sub(json_pattern, '', raw_data_cleaned, flags=re.DOTALL)
+    
+    # Handle remaining unformatted text
+    unformatted_text = raw_data_cleaned.strip()
+    if unformatted_text:
+        # Optionally, implement chunking here in the future
+        # For now, treat the entire unformatted text as a single record
+        # Assign a unique ID if necessary
+        records.append({
+            "type": "unformatted",
+            "id": generate_unique_id(),
+            "content": unformatted_text
+        })
+        logger.debug(f"Extracted unformatted record with generated ID.")
+    
+    logger.info(f"Split data into {len(records)} records.")
+    return records
 
 
 def write_output_file(file_path, data):
@@ -380,3 +429,14 @@ def create_documents_dataframe(base_folder):
     # Create a DataFrame
     df = pd.DataFrame(documents_data)
     return df
+
+def generate_unique_id(prefix: str = "REC") -> str:
+    """
+    Generate a unique ID for records without an existing ID.
+    
+    :param prefix: Prefix for the unique ID.
+    :return: A unique ID string.
+    """
+    import uuid
+    unique_part = uuid.uuid4().hex[:8].upper()
+    return f"{prefix}_{unique_part}"
