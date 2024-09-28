@@ -4,6 +4,7 @@ import logging
 from typing import List, Optional, Union, Dict, Any
 import os
 import json
+import re
 
 import pandas as pd
 from PyPDF2 import PdfReader
@@ -82,24 +83,65 @@ class InputProcessor:
                 text_type = detect_text_type(content)
                 logger.debug(f"Detected text type: {text_type}")
 
-                if text_type in ["json", "tagged"]:
-                    # Handle JSON and Tagged Text
-                    logger.info(f"Processing content as '{text_type}'.")
-                    record = Record.parse_record(
-                        record_str=content,
-                        return_type=return_type,
-                        record_type=record_type,
-                        llm_formatter=None  # No need for LLMFormatter in this case
-                    )
-                    if record:
-                        processed_records.append(record)
-                    else:
-                        logger.warning(f"Failed to parse record from '{text_type}' content.")
+                if text_type == "tagged":
+                    # Extract multiple tagged records
+                    logger.info("Processing content as 'tagged' text. Extracting multiple records.")
+                    tagged_records = self._extract_multiple_tagged_records(content)
+                    logger.info(f"Found {len(tagged_records)} tagged record(s).")
+
+                    for idx, record_str in enumerate(tagged_records, start=1):
+                        logger.debug(f"Processing tagged record {idx}/{len(tagged_records)}.")
+                        record = Record.parse_record(
+                            record_str=record_str,
+                            return_type=return_type,
+                            record_type=record_type,
+                            llm_formatter=None  # Tagged records don't need LLMFormatter
+                        )
+                        if record:
+                            processed_records.append(record)
+                        else:
+                            logger.warning(f"Failed to parse tagged record {idx}.")
+
+                elif text_type == "json":
+                    # Handle both single JSON objects and JSON arrays
+                    logger.info("Processing content as 'json'.")
+                    try:
+                        json_data = json.loads(content)
+                        if isinstance(json_data, list):
+                            logger.info(f"Processing {len(json_data)} JSON record(s).")
+                            for idx, record_dict in enumerate(json_data, start=1):
+                                record = Record.parse_record(
+                                    record_str=json.dumps(record_dict),
+                                    return_type=return_type,
+                                    record_type=record_type,
+                                    llm_formatter=None  # Assuming JSON records are structured
+                                )
+                                if record:
+                                    processed_records.append(record)
+                                else:
+                                    logger.warning(f"Failed to parse JSON record {idx}.")
+                        elif isinstance(json_data, dict):
+                            logger.info("Processing single JSON record.")
+                            record = Record.parse_record(
+                                record_str=content,
+                                return_type=return_type,
+                                record_type=record_type,
+                                llm_formatter=None
+                            )
+                            if record:
+                                processed_records.append(record)
+                            else:
+                                logger.warning("Failed to parse JSON record.")
+                        else:
+                            logger.error("Unsupported JSON structure.")
+                    except json.JSONDecodeError as e:
+                        logger.error(f"JSON decoding error: {e}")
+
                 elif text_type == "unformatted":
-                    # Handle Unformatted Text: Chunk and parse
+                    # Handle unformatted text: Chunk and parse
                     logger.info("Processing content as 'unformatted' text. Initiating chunking.")
                     chunks = self._chunk_text(content)
-                    logger.info(f"Created {len(chunks)} chunks from unformatted text.")
+                    logger.info(f"Created {len(chunks)} chunk(s) from unformatted text.")
 
                     for idx, chunk in enumerate(chunks, start=1):
                         logger.debug(f"Processing chunk {idx}/{len(chunks)}.")
@@ -118,30 +160,31 @@ class InputProcessor:
 
             elif file_extension in self.SUPPORTED_TABULAR_EXTENSIONS:
                 records = self._process_tabular_file(file_path)
-                logger.info(f"Processed {len(records)} records from tabular file.")
+                logger.info(f"Processed {len(records)} record(s) from tabular file.")
 
-                for record in records:
-                    parsed_record = Record.parse_record(
-                        record_str=json.dumps(record),
+                for idx, record_dict in enumerate(records, start=1):
+                    logger.debug(f"Processing tabular record {idx}/{len(records)}.")
+                    record = Record.parse_record(
+                        record_str=json.dumps(record_dict),
                         return_type=return_type,
                         record_type=record_type,
                         llm_formatter=None  # Assuming tabular data is already structured
                     )
-                    if parsed_record:
-                        processed_records.append(parsed_record)
+                    if record:
+                        processed_records.append(record)
                     else:
-                        logger.warning(f"Failed to parse tabular record with ID: {record.get('record_id') or record.get('id')}")
+                        logger.warning(f"Failed to parse tabular record {idx} with ID: {record_dict.get('record_id') or record_dict.get('id')}.")
 
             elif file_extension in self.SUPPORTED_DOCUMENT_EXTENSIONS:
                 content = self._extract_document_file(file_path, file_extension)
-                # Treat the extracted content as unformatted text
                 text_type = "unformatted"
                 logger.debug(f"Detected text type: {text_type}")
 
+                # Treat the extracted content as unformatted text
                 if text_type == "unformatted":
                     logger.info("Processing content as 'unformatted' text. Initiating chunking.")
                     chunks = self._chunk_text(content)
-                    logger.info(f"Created {len(chunks)} chunks from document text.")
+                    logger.info(f"Created {len(chunks)} chunk(s) from document text.")
 
                     for idx, chunk in enumerate(chunks, start=1):
                         logger.debug(f"Processing chunk {idx}/{len(chunks)}.")
@@ -155,7 +198,6 @@ class InputProcessor:
                             processed_records.append(record)
                         else:
                             logger.warning(f"Failed to parse chunk {idx} into a Record.")
-
             else:
                 logger.error(f"Unsupported file extension: '{file_extension}'. Supported extensions are: "
                              f"{self.SUPPORTED_TEXT_EXTENSIONS + self.SUPPORTED_TABULAR_EXTENSIONS + self.SUPPORTED_DOCUMENT_EXTENSIONS}")
@@ -166,6 +208,26 @@ class InputProcessor:
 
         logger.info(f"Processing complete. Total records processed: {len(processed_records)}.")
         return processed_records
+
+    def _extract_multiple_tagged_records(self, content: str) -> List[str]:
+        """
+        Extract multiple tagged records from the content based on <id=...> tags.
+
+        :param content: The raw text content containing multiple records.
+        :return: A list of individual record strings.
+        """
+        # Regex to find all <id=...>...</id=...> blocks
+        pattern = re.compile(r'(<id=.+?>)(.*?)</id=.+?>', re.DOTALL)
+        matches = pattern.findall(content)
+
+        records = []
+        for match in matches:
+            start_tag, record_content = match
+            end_tag = re.sub(r'<id=(.+?)>', r'</id=\1>', start_tag)
+            full_record = f"{start_tag}{record_content}{end_tag}"
+            records.append(full_record.strip())
+
+        return records
     
     def _extract_text_file(self, file_path: str, file_extension: str) -> str:
         """

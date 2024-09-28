@@ -282,13 +282,12 @@ class Record:
         
 
     @classmethod
-    @classmethod
     def parse_record(
         cls,
         record_str: str,
         return_type: str = "record",
         record_type: str = "DOC",
-        llm_formatter: Optional[Any] = None
+        llm_formatter: Optional[LLMFormatter] = None
     ) -> Optional[Union['Record', Dict[str, Any], str]]:
         """
         Parse a record string into a Record object, dictionary, or JSON string.
@@ -309,8 +308,26 @@ class Record:
             # Detect the input text type
             text_type = detect_text_type(record_str)
             logger.debug(f"Detected text type: {text_type}")
+            
+            if text_type == "unformatted":
+                # Handle unformatted text
+                logger.debug("Input is detected as unformatted text format.")
 
-            if text_type == "json":
+                if not llm_formatter:
+                    logger.error("LLMFormatter instance is required to process unformatted text.")
+                    return None
+
+                # Use LLMFormatter to convert unformatted text to tagged format
+                formatted_text = llm_formatter.format_text(raw_text=record_str, mode="tagged")
+                if not formatted_text:
+                    logger.error("LLMFormatter failed to format unformatted text.")
+                    return None
+                record_str = formatted_text  # Update record_str to tagged format
+                logger.debug("Successfully converted unformatted text to tagged format. Proceed as a tagged text")
+                text_type = "tagged"  # Update text_type after conversion
+
+
+            elif text_type == "json":
                 # Attempt to parse as JSON
                 try:
                     data = json.loads(record_str)
@@ -411,29 +428,7 @@ class Record:
                     logger.error(f"Invalid return_type '{return_type}' specified. Choose from 'record', 'dict', 'json'.")
                     return None
 
-            elif text_type == "unformatted":
-                # Handle unformatted text
-                logger.debug("Input is detected as unformatted text format.")
-
-                if not llm_formatter:
-                    logger.error("LLMFormatter instance is required to process unformatted text.")
-                    return None
-
-                # Use LLMFormatter to convert unformatted text to tagged format
-                formatted_text = llm_formatter.format_text(raw_text=record_str, mode="tagged")
-                if not formatted_text:
-                    logger.error("LLMFormatter failed to format unformatted text.")
-                    return None
-
-                logger.debug("LLMFormatter successfully formatted unformatted text into tagged format.")
-
-                # Recursively parse the formatted tagged text
-                return cls.parse_record(
-                    record_str=formatted_text,
-                    return_type=return_type,
-                    record_type=record_type,
-                    llm_formatter=llm_formatter  # Pass the same formatter to prevent infinite recursion
-                )
+                
 
             else:
                 logger.error("Unknown text type detected. Cannot parse the record.")

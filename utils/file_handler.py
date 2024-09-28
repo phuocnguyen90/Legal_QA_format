@@ -172,7 +172,7 @@ def append_to_output_file(file_path: str, records: Union[Dict[str, Any], List[Di
 
     except Exception as e:
         logger.error(f"An error occurred in append_to_output_file: {e}")
-
+        
 def save_processed_record(record: Dict[str, Any], file_path: str):
     """
     Save a single processed record to the output file.
