@@ -11,25 +11,13 @@ from tasks.postprocessing import main_postprocessing
 from utils.input_processor import InputProcessor
 from utils.file_handler import output_2_jsonl
 def main():
-    # Remove all existing handlers
-    for handler in logging.root.handlers[:]:
-        logging.root.removeHandler(handler)
 
-    # Create a StreamHandler with UTF-8 encoding
-    stream_handler = logging.StreamHandler(sys.stdout)
-    stream_handler.setLevel(logging.DEBUG)  # Set the desired logging level
-
-    # Define a formatter that includes the timestamp, logger name, level, and message
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    stream_handler.setFormatter(formatter)
-
-    # Set the encoding to 'utf-8' (available in Python 3.9+)
-    # For earlier versions, you might need to use a workaround
  
     # Add the handler to the root logger
+    setup_logging
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)  # Set the desired logging level
-    logger.addHandler(stream_handler)
+
     # Load configuration
     try:
         config = load_config('config/config.yaml')

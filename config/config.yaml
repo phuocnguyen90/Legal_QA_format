@@ -1,0 +1,46 @@
+# config.yaml
+
+provider: groq  # Options: groq, google_gemini
+
+groq:
+  api_key: ${GROQ_API_KEY}
+  model_name: "llama-3.1-70b-versatile"
+  temperature: 0.7
+  max_output_tokens: 2048
+  # Add other Groq-specific settings if necessary
+
+openai:
+  api_key: ${OPENAI_API_KEY}
+  model_name: "gpt-3.5-turbo"
+  temperature: 0.7
+  max_output_tokens: 4096
+  # Add other Groq-specific settings if necessary
+
+
+google_gemini:
+  api_key: ${GEMINI_API_KEY}
+  model_name: "gemini-1.5-flash"
+  temperature: 1
+  top_p: 0.95
+  top_k: 64
+  max_output_tokens: 8192
+  # Add other Google Gemini-specific settings if necessary
+
+processing:
+  input_file: "data/raw/input.txt"
+  preprocessed_file: "data/preprocessed/preprocessed_data.jsonl"
+  processed_file: "data/processed/processed_data.jsonl"
+  final_output_file: "data/processed/result.jsonl"
+  log_file: "logs/processing.log"
+  delay_between_requests: 1  # in seconds
+  processing: True
+  schema_paths:
+    pre_processing_schema: "config/schemas/preprocessing_schema.yaml"
+    postprocessing_schema: "config/schemas/postprocessing_schema.yaml"
+    prompts: "config/schemas/prompts.yaml"
+
+ollama:
+  api_key: ollama
+  model_path: "/path/to/ollama/model"
+  temperature: 0.7
+  max_output_tokens: 4096
