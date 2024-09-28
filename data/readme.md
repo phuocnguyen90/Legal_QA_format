@@ -44,7 +44,7 @@ To ingest data into the `Record` class, prepare your raw data in JSON or tagged 
   "language": "vi",
   "summary": ""
 }
-
+```
 Below is an expample of a tagged object:
 
 ```tagged
@@ -55,6 +55,6 @@ Below is an expample of a tagged object:
 <content>GIẤY CHỨNG NHẬN ATTP NẤM ĐÔNG TRÙNG HẠ THẢO\nI/ Khái niệm ...
 </content>
 </id=QA1>
-
+```
 ### Raw text ingestion
-The module can handle raw text (.doc, .txt) files by chunking them into smaller chunks and automatically assign an ID, and a title to each chunk. However this is not recommended as it is only in early development for chunking algorithm
+The module can handle raw text (.doc, .txt) files by chunking them into smaller chunks and automatically assigning an ID, and a title to each chunk. However, this is not recommended as it is only in early development for the chunking algorithm
