@@ -19,24 +19,47 @@ class Preprocessor:
     A class to handle the pre-processing and processing of individual records.
     """
 
-    def __init__(self, config: Dict[str, Any], llm_formatter: LLMFormatter):
+    def __init__(self, config: Dict[str, Any]):
         """
-        Initialize the Preprocessor with the given configuration and LLMFormatter.
+        Initialize the Preprocessor with the given configuration.
 
         :param config: Configuration dictionary.
-        :param llm_formatter: An instance of LLMFormatter for formatting and enrichment.
         """
         self.config = config
-        self.llm_formatter = llm_formatter
+        self.llm_formatter = self._initialize_llm_formatter()
         logger.info("Preprocessor initialized with provided configuration.")
 
         # Load preprocessing schema
+        self.preprocessing_schema = self._load_preprocessing_schema()
+        self.pre_process_requirements = self.preprocessing_schema.get('pre_process_requirements', [])
+        if not self.pre_process_requirements:
+            logger.warning("No 'pre_process_requirements' found in the schema.")
+
+    def _initialize_llm_formatter(self) -> LLMFormatter:
+        """
+        Initialize the LLMFormatter with the given configuration.
+
+        :return: An instance of LLMFormatter.
+        """
+        try:
+            prompts_path = self.config.get('prompts_path', 'config/schemas/prompts.yaml')
+            llm_formatter = LLMFormatter(config=self.config, prompts_path=prompts_path)
+            return llm_formatter
+        except Exception as e:
+            logger.error(f"Failed to initialize LLMFormatter: {e}")
+            raise
+
+    def _load_preprocessing_schema(self) -> Dict[str, Any]:
+        """
+        Load the preprocessing schema from the specified path in the configuration.
+
+        :return: Dictionary representing the preprocessing schema.
+        """
         try:
             schema_path = self.config['processing']['schema_paths']['pre_processing_schema']
-            self.preprocessing_schema = load_schema(schema_path)
-            self.pre_process_requirements = self.preprocessing_schema.get('pre_process_requirements', [])
-            if not self.pre_process_requirements:
-                logger.warning("No 'pre_process_requirements' found in the schema.")
+            schema = load_schema(schema_path)  # Ensure load_schema is properly implemented
+            logger.info(f"Preprocessing schema loaded from '{schema_path}'.")
+            return schema
         except KeyError as ke:
             logger.error(f"Missing key in configuration: {ke}")
             raise

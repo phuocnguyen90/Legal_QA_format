@@ -14,6 +14,7 @@ import pandas as pd
 from utils.llm_formatter import LLMFormatter
 import uuid
 from utils.load_config import load_config
+from utils.validation import detect_text_type
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -138,7 +139,7 @@ class Record:
             summary = data.get('summary', '')
             
             return cls(
-                record_id=record_id,
+                record_id=record_id if record_id else generate_unique_id("REC"),
                 document_id=document_id,
                 title=title,
                 content=content,
@@ -281,6 +282,7 @@ class Record:
         
 
     @classmethod
+    @classmethod
     def parse_record(
         cls,
         record_str: str,
@@ -304,15 +306,24 @@ class Record:
         :return: Record object, dictionary, JSON string, or None if parsing fails.
         """
         try:
-            # Attempt to parse as JSON
-            try:
-                data = json.loads(record_str)
-                logger.debug("Input is detected as JSON format.")
-                record = cls.from_dict(data)
-                if record:
-                    logger.info(f"Record parsed successfully from JSON with ID: {record.record_id}")
-                else:
-                    logger.warning("Failed to create Record from JSON data.")
+            # Detect the input text type
+            text_type = detect_text_type(record_str)
+            logger.debug(f"Detected text type: {text_type}")
+
+            if text_type == "json":
+                # Attempt to parse as JSON
+                try:
+                    data = json.loads(record_str)
+                    logger.debug("Input is detected as JSON format.")
+                    record = cls.from_dict(data)
+                    if record:
+                        logger.info(f"Record parsed successfully from JSON with ID: {record.record_id}")
+                    else:
+                        logger.warning("Failed to create Record from JSON data.")
+                except json.JSONDecodeError as e:
+                    logger.error(f"JSON decoding error: {e}")
+                    return None
+
                 if return_type == "record":
                     return record
                 elif return_type == "dict":
@@ -322,19 +333,10 @@ class Record:
                 else:
                     logger.error(f"Invalid return_type '{return_type}' specified. Choose from 'record', 'dict', 'json'.")
                     return None
-            except json.JSONDecodeError:
-                logger.debug("Input is not JSON format. Attempting to parse as tagged text.")
 
-            # Check for presence of mandatory tags
-            has_title = re.search(r'<title>.*?</title>', record_str, re.DOTALL)
-            has_content = re.search(r'<content>.*?</content>', record_str, re.DOTALL)
-            if has_title and has_content:
-                logger.debug("Input is detected as tagged text format.")
-            else:
-                logger.debug("Input is detected as unformatted text format.")
-
-            # If not JSON and has mandatory tags, parse as tagged text
-            if has_title and has_content:
+            elif text_type == "tagged":
+                # Parse as tagged text
+                logger.debug("Parsing input as tagged text format.")
                 # Extract fields using regular expressions with flexible ID patterns
                 record_id_match = re.search(r'<id=([A-Za-z]{2,3}_[A-Za-z0-9]+)>', record_str)
                 document_id_match = re.search(r'<document_id=([A-Za-z]{2,3}_[A-Za-z0-9]+)>', record_str)
@@ -409,13 +411,12 @@ class Record:
                     logger.error(f"Invalid return_type '{return_type}' specified. Choose from 'record', 'dict', 'json'.")
                     return None
 
-            # If not JSON and not tagged, treat as unformatted
-            else:
-                logger.debug("Input is detected as unformatted text.")
-                
-                
+            elif text_type == "unformatted":
+                # Handle unformatted text
+                logger.debug("Input is detected as unformatted text format.")
+
                 if not llm_formatter:
-                    logger.error("Failed to load LLMFormatter instance.")
+                    logger.error("LLMFormatter instance is required to process unformatted text.")
                     return None
 
                 # Use LLMFormatter to convert unformatted text to tagged format
@@ -433,8 +434,14 @@ class Record:
                     record_type=record_type,
                     llm_formatter=llm_formatter  # Pass the same formatter to prevent infinite recursion
                 )
+
+            else:
+                logger.error("Unknown text type detected. Cannot parse the record.")
+                return None
+
         except Exception as e:
             logger.error(f"Error parsing text into Record object: {e}")
+            return None
 
 def generate_record_id(record_type: str) -> str:
     """

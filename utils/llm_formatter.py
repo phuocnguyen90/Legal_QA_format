@@ -8,6 +8,7 @@ from providers import ProviderFactory
 from providers.openai_provider import OpenAIProvider
 from providers.groq_provider import GroqProvider
 from providers.api_provider import APIProvider
+from utils.validation import detect_text_type
 # logging.getLogger(__name__)
 
 # Configure logging
@@ -80,58 +81,107 @@ class LLMFormatter:
             logger.error(f"Failed to initialize provider '{provider_name}': {e}")
             raise
 
-    def format_text(self, raw_text: str, mode: str = "tagged", record_type: Optional[str] = None, json_schema: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    def format_text(
+        self, 
+        raw_text: str, 
+        mode: str = "tagged", 
+        record_type: Optional[str] = None, 
+        json_schema: Optional[Dict[str, Any]] = None
+    ) -> Optional[str]:
         """
         Format raw text into structured formats using the specified mode and provider.
 
-        :param raw_text: The raw unformatted text.
-        :param mode: The formatting mode ("tagged", "json", or "enrichment").
+        :param raw_text: The raw text input (could be tagged, json, or unformatted).
+        :param mode: The desired formatting mode ("tagged", "json", or "enrichment").
         :param record_type: Type of the record ("QA" or "DOC") for enrichment mode.
         :param json_schema: JSON schema for "json" mode.
         :return: Formatted text as per the specified mode or None if formatting fails.
         """
         try:
-            current_provider = self.provider
-            current_provider_name = self.provider_name
+            # Detect the input text type
+            text_type = detect_text_type(raw_text)
+            logger.debug(f"Detected text type: {text_type}")
 
-            # Handle provider override if necessary
-            # (Omitted here for brevity; similar to previous implementation)
+            # If input is unformatted, convert it to tagged using LLMFormatter
+            if text_type == "unformatted":
+                if mode != "tagged":
+                    logger.error("Unformatted input can only be converted to 'tagged' mode.")
+                    return None
+                logger.info("Converting unformatted text to tagged format using LLMFormatter.")
+                # Retrieve the tagged prompt template
+                prompt_template = self.prompts.get('formatting', {}).get('tagged', {}).get('prompt')
+                if not prompt_template:
+                    logger.error("Tagged prompt template not found in prompts.yaml.")
+                    return None
+                # Format the prompt with the raw_text
+                prompt = prompt_template.format(raw_text=raw_text)
+                # Send the prompt to the provider
+                formatted_output = self.provider.send_message(prompt=prompt)
+                if not formatted_output:
+                    logger.error("LLMFormatter failed to convert unformatted text to tagged format.")
+                    return None
+                raw_text = formatted_output  # Update raw_text to tagged format
+                text_type = "tagged"  # Update text_type after conversion
+                logger.debug("Successfully converted unformatted text to tagged format.")
 
-            # Determine the category of the mode
-            if mode == "enrichment":
-                prompt_template = self.prompts.get('enrichment', {}).get('enrichment_prompt')
-                if not prompt_template:
-                    logger.error("Enrichment prompt template not found.")
-                    return None
-                if not record_type:
-                    logger.error("record_type must be specified for enrichment mode.")
-                    return None
-                prompt = prompt_template.format(chunk_text=raw_text)
-            elif mode in self.prompts.get('formatting', {}):
-                prompt_template = self.prompts['formatting'].get(mode)
-                if not prompt_template:
-                    logger.error(f"No prompt found for formatting mode '{mode}'.")
-                    return None
-                if mode == "json":
+            # Handle based on desired mode
+            if mode == "tagged":
+                if text_type == "tagged":
+                    logger.info("Input is already in tagged format. Returning as-is.")
+                    return raw_text
+                elif text_type == "json":
+                    logger.info("Converting JSON to tagged format.")
+                    prompt_template = self.prompts.get('formatting', {}).get('tagged', {}).get('prompt')
+                    if not prompt_template:
+                        logger.error("Tagged prompt template not found in prompts.yaml.")
+                        return None
+                    prompt = prompt_template.format(raw_text=raw_text)
+                    formatted_output = self.provider.send_message(prompt=prompt)
+                    if not formatted_output:
+                        logger.error("LLMFormatter failed to convert JSON to tagged format.")
+                        return None
+                    return formatted_output
+
+            elif mode == "json":
+                if text_type == "json":
+                    logger.info("Input is already in JSON format. Returning as-is.")
+                    return raw_text
+                elif text_type == "tagged":
+                    logger.info("Converting tagged format to JSON.")
+                    prompt_template = self.prompts.get('formatting', {}).get('json', {}).get('prompt')
+                    if not prompt_template:
+                        logger.error("JSON prompt template not found in prompts.yaml.")
+                        return None
                     if not json_schema:
                         logger.error("json_schema must be provided for json formatting mode.")
                         return None
                     json_schema_str = json.dumps(json_schema, indent=2)
                     prompt = prompt_template.format(raw_text=raw_text, json_schema=json_schema_str)
-                else:
-                    prompt = prompt_template.format(raw_text=raw_text)
+                    formatted_output = self.provider.send_message(prompt=prompt)
+                    if not formatted_output:
+                        logger.error("LLMFormatter failed to convert tagged format to JSON.")
+                        return None
+                    return formatted_output
+
+            elif mode == "enrichment":
+                logger.info("Performing enrichment on the input text.")
+                prompt_template = self.prompts.get('enrichment', {}).get('enrichment_prompt')
+                if not prompt_template:
+                    logger.error("Enrichment prompt template not found in prompts.yaml.")
+                    return None
+                if not record_type:
+                    logger.error("record_type must be specified for enrichment mode.")
+                    return None
+                prompt = prompt_template.format(chunk_text=raw_text)
+                formatted_output = self.provider.send_message(prompt=prompt)
+                if not formatted_output:
+                    logger.error("LLMFormatter failed to perform enrichment.")
+                    return None
+                return formatted_output
+
             else:
                 logger.error(f"Unsupported formatting mode: {mode}")
                 return None
-
-            logger.debug(f"Sending prompt to provider '{current_provider_name}' with mode '{mode}'.")
-            formatted_output = current_provider.send_message(prompt=prompt)
-
-            if not formatted_output:
-                logger.error("Formatting failed or returned empty output.")
-                return None
-
-            return formatted_output
 
         except Exception as e:
             logger.error(f"Error in format_text method: {e}")

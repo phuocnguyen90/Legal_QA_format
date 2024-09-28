@@ -7,7 +7,8 @@ from utils.validation import mask_api_key, load_schema, validate_record
 from utils.retry_handler import retry
 from tasks.preprocessing import Preprocessor
 from tasks.postprocessing import main_postprocessing
-
+from utils.input_processor import InputProcessor
+from utils.file_handler import append_to_output_file
 def main():
     # Load configuration
     try:
@@ -23,6 +24,13 @@ def main():
     except Exception as e:
         print(f"Failed to set up logging: {e}")
         return
+     # Initialize InputProcessor
+
+    try:
+        input_processor = InputProcessor(config=config)
+    except Exception as e:
+        logging.error(f"Failed to initialize InputProcessor: {e}")
+        return
 
 
     # Initialize Preprocessor
@@ -34,15 +42,17 @@ def main():
         return
 
     # Define input and output file paths
-    input_file = config['processing']['input_file']
+    # input_file = config['processing']['input_file']
+    input_file="data\\raw\\ND-01-2020.docx"
     output_file = config['processing']['preprocessed_file']
-    formatted = config['processing'].get('formatted', True)  # Default to True
+
 
     # Process all records
 
     try:
-        preprocessor.process_all_records(input_file, output_file, formatted=formatted)
+        records=input_processor.process_input_file(input_file,return_type='dict',record_type='QA')
         logging.info("All records processed successfully.")
+        append_to_output_file(output_file,records)
     except Exception as e:
         logging.error(f"Error processing records: {e}")
 

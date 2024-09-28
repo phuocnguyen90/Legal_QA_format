@@ -4,14 +4,14 @@ import logging
 import json
 from typing import List, Optional
 
-from utils.file_handler import read_input_file, split_into_records, save_processed_record
 from utils.load_config import load_config
 from utils.record import Record
 from utils.llm_formatter import LLMFormatter
 from tasks.preprocessing import Preprocessor
 
 def main():
-    formatter =LLMFormatter
+    config = load_config('config/config.yaml')
+    formatter = LLMFormatter(config=config)
     # Example 1: Tagged Record with Prefixed ID
     tagged_record = """
     <id=DOC_001>
