@@ -16,8 +16,10 @@ from dotenv import load_dotenv
 from utils.validation import mask_api_key
 from utils.record import Record
 
+# Configure logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# logging.getLogger(__name__)
 def load_record(raw_input: str, llm_processor, is_formatted: bool = True) -> Optional[Record]:
     """
     Load a Record object from raw input, determining the format.
@@ -78,30 +80,6 @@ def read_input_file(file_path):
         logging.error(f"Error reading input file '{file_path}': {e}")
         raise
 
-def split_into_records(data):
-    """
-    Split the raw data into individual records using either <id=number></id=number> tags or JSON objects with an "id" property.
-    """
-    try:
-        # Define patterns for tagged text and JSON text
-        tag_pattern = r'<id=\d+>.*?</id=\d+>'
-        json_pattern = r'\{[^{}]*"id"\s*:\s*\d+[^{}]*\}'
-        
-        # Combine both patterns using alternation
-        combined_pattern = f'({tag_pattern})|({json_pattern})'
-        
-        # Find all matches in the data
-        matches = re.finditer(combined_pattern, data, re.DOTALL)
-        
-        # Extract matched strings from the iterator
-        records = [match.group(0) for match in matches]
-        
-        logging.info(f"Split data into {len(records)} records.")
-        return records
-    except Exception as e:
-        logging.error(f"Error splitting data into records: {e}")
-        return []
-
 
 
 def write_output_file(file_path, data):
@@ -115,66 +93,86 @@ def write_output_file(file_path, data):
     except Exception as e:
         logging.error(f"Error writing to output file '{file_path}': {e}")
 
-def append_to_output_file(file_path: str, record: Dict[str, Any]):
+def append_to_output_file(file_path: str, records: Union[Dict[str, Any], List[Dict[str, Any]]]):
     """
-    Append a processed record to the output file.
-    If a record with the same 'id' exists, overwrite it.
+    Append processed record(s) to the output file.
+    If a record with the same 'record_id' or 'id' exists, overwrite it.
     If the file does not exist, create it.
 
     Records are stored as JSON objects separated by double newlines.
 
     :param file_path: Path to the output file.
-    :param record: Dictionary representing the processed record.
+    :param records: A single dictionary or a list of dictionaries representing the processed record(s).
     """
     try:
-        # Ensure the record has an 'id' field
-        record_id = record.get('id')
-        if record_id is None:
-            logging.error("Record does not contain an 'id' field.")
+        # Normalize records to a list
+        if isinstance(records, dict):
+            records_to_add = [records]
+        elif isinstance(records, list):
+            records_to_add = records
+        else:
+            logger.error("The 'records' parameter must be a dictionary or a list of dictionaries.")
             return
 
+        # Initialize a dictionary to hold existing records for quick lookup
+        existing_records_dict = {}
+
+        # Check if the output file exists and load existing records
         if os.path.exists(file_path):
-            logging.debug(f"Output file '{file_path}' exists. Reading existing records.")
+            logger.debug(f"Output file '{file_path}' exists. Reading existing records.")
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = f.read()
 
-            # Parse existing records
             if data.strip():
                 record_strings = data.strip().split('\n\n')
-                try:
-                    records = [json.loads(r) for r in record_strings]
-                except json.JSONDecodeError as e:
-                    logging.error(f"JSON decoding error while reading '{file_path}': {e}")
-                    return
+                for record_str in record_strings:
+                    try:
+                        record = json.loads(record_str)
+                        # Use 'record_id' as the primary identifier, fallback to 'id' if necessary
+                        record_id = record.get('record_id') or record.get('id')
+                        if record_id:
+                            existing_records_dict[record_id] = record
+                        else:
+                            logger.warning("Existing record does not contain 'record_id' or 'id'. Skipping.")
+                    except json.JSONDecodeError as e:
+                        logger.error(f"JSON decoding error while reading '{file_path}': {e}")
+                        continue
             else:
-                records = []
-
-            # Check if a record with the same 'id' exists
-            existing_record = next((r for r in records if r.get('id') == record_id), None)
-            if existing_record:
-                # Overwrite the existing record
-                logging.info(f"Overwriting existing record with id {record_id}.")
-                records = [record if r.get('id') == record_id else r for r in records]
-            else:
-                # Append the new record
-                logging.info(f"Appending new record with id {record_id}.")
-                records.append(record)
+                logger.debug(f"Output file '{file_path}' is empty. No existing records found.")
         else:
-            # File does not exist; create it and add the record
-            logging.info(f"Output file '{file_path}' does not exist. Creating and adding record with id {record_id}.")
-            records = [record]
+            logger.info(f"Output file '{file_path}' does not exist. It will be created.")
+
+        # Process each new record
+        for record in records_to_add:
+            if not isinstance(record, dict):
+                logger.warning("Skipping non-dictionary record.")
+                continue
+
+            # Use 'record_id' as the primary identifier, fallback to 'id' if necessary
+            record_id = record.get('record_id') or record.get('id')
+            if not record_id:
+                logger.error("Record does not contain a 'record_id' or 'id' field. Skipping.")
+                continue
+
+            if record_id in existing_records_dict:
+                logger.info(f"Overwriting existing record with ID: {record_id}.")
+            else:
+                logger.info(f"Appending new record with ID: {record_id}.")
+
+            # Update or add the record in the existing_records_dict
+            existing_records_dict[record_id] = record
 
         # Write all records back to the file
         with open(file_path, 'w', encoding='utf-8') as f:
-            for rec in records:
+            for rec_id, rec in existing_records_dict.items():
                 json.dump(rec, f, ensure_ascii=False, indent=2)
                 f.write('\n\n')  # Separator between records
 
-        logging.debug(f"Record with id {record_id} has been successfully saved to '{file_path}'.")
+        logger.debug(f"Successfully saved {len(existing_records_dict)} record(s) to '{file_path}'.")
 
     except Exception as e:
-        logging.error(f"An error occurred in append_to_output_file: {e}")
-
+        logger.error(f"An error occurred in append_to_output_file: {e}")
+        
 def save_processed_record(record: Dict[str, Any], file_path: str):
     """
     Save a single processed record to the output file.
@@ -380,3 +378,94 @@ def create_documents_dataframe(base_folder):
     # Create a DataFrame
     df = pd.DataFrame(documents_data)
     return df
+
+def generate_unique_id(prefix: str = "REC") -> str:
+    """
+    Generate a unique ID for records without an existing ID.
+    
+    :param prefix: Prefix for the unique ID.
+    :return: A unique ID string.
+    """
+    import uuid
+    unique_part = uuid.uuid4().hex[:8].upper()
+    return f"{prefix}_{unique_part}"
+
+
+
+
+def append_to_output_file_jsonl(file_path: str, records: Union[Dict[str, Any], List[Dict[str, Any]]]):
+    """
+    Append processed record(s) to the output file in JSONL format.
+    If a record with the same 'record_id' or 'id' exists, overwrite it.
+    If the file does not exist, create it.
+
+    Records are stored as JSON objects, one per line.
+
+    :param file_path: Path to the output file.
+    :param records: A single dictionary or a list of dictionaries representing the processed record(s).
+    """
+    try:
+        # Normalize records to a list
+        if isinstance(records, dict):
+            records_to_add = [records]
+        elif isinstance(records, list):
+            records_to_add = records
+        else:
+            logger.error("The 'records' parameter must be a dictionary or a list of dictionaries.")
+            return
+
+        # Initialize a dictionary to hold existing records for quick lookup
+        existing_records_dict = {}
+
+        # Check if the output file exists and load existing records
+        if os.path.exists(file_path):
+            logger.debug(f"Output file '{file_path}' exists. Reading existing records.")
+            with open(file_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                        # Use 'record_id' as the primary identifier, fallback to 'id' if necessary
+                        record_id = record.get('record_id') or record.get('id')
+                        if record_id:
+                            existing_records_dict[record_id] = record
+                        else:
+                            logger.warning("Existing record does not contain 'record_id' or 'id'. Skipping.")
+                    except json.JSONDecodeError as e:
+                        logger.error(f"JSON decoding error while reading '{file_path}': {e}")
+                        continue
+        else:
+            logger.info(f"Output file '{file_path}' does not exist. It will be created.")
+
+        # Process each new record
+        for record in records_to_add:
+            if not isinstance(record, dict):
+                logger.warning("Skipping non-dictionary record.")
+                continue
+
+            # Use 'record_id' as the primary identifier, fallback to 'id' if necessary
+            record_id = record.get('record_id') or record.get('id')
+            if not record_id:
+                logger.error("Record does not contain a 'record_id' or 'id' field. Skipping.")
+                continue
+
+            if record_id in existing_records_dict:
+                logger.info(f"Overwriting existing record with ID: {record_id}.")
+            else:
+                logger.info(f"Appending new record with ID: {record_id}.")
+
+            # Update or add the record in the existing_records_dict
+            existing_records_dict[record_id] = record
+
+        # Write all records back to the file in JSONL format
+        with open(file_path, 'w', encoding='utf-8') as f:
+            for rec_id, rec in existing_records_dict.items():
+                json.dump(rec, f, ensure_ascii=False)
+                f.write('\n')  # Newline separator between records
+
+        logger.debug(f"Successfully saved {len(existing_records_dict)} record(s) to '{file_path}'.")
+
+    except Exception as e:
+        logger.error(f"An error occurred in append_to_output_file_jsonl: {e}")

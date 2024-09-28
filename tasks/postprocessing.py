@@ -7,13 +7,13 @@ import os
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.file_handler import read_input_file, split_into_records, save_processed_record, append_to_output_file, load_record
+from utils.file_handler import read_input_file,  append_to_output_file, load_record
 from utils.validation import load_schema, validate_record
 from utils.validation import mask_api_key
 from utils.load_config import load_config
 from providers import ProviderFactory  # Ensure providers are properly structured
 from utils.retry_handler import retry
-from utils.record import Record, parse_record
+
 
 # logging.getLogger(__name__)
 
@@ -85,17 +85,17 @@ def main_postprocessing():
         
         # Validate Postprocessed Data
         if not validate_record(postprocessed_record.to_dict(), postprocessing_schema):
-            logging.warning(f"Postprocessed record ID {postprocessed_record.id} failed validation.")
-            print(f"Postprocessed record ID {postprocessed_record.id} failed validation.")
+            logging.warning(f"Postprocessed record ID {postprocessed_record.record_id} failed validation.")
+            print(f"Postprocessed record ID {postprocessed_record.record_id} failed validation.")
             continue
         
         # Save postprocessed record
         try:
             append_to_output_file(output_file, postprocessed_record.to_dict())
-            logging.info(f"Record ID {postprocessed_record.id} postprocessed and saved successfully.")
+            logging.info(f"Record ID {postprocessed_record.record_id} postprocessed and saved successfully.")
         except Exception as e:
-            logging.error(f"Failed to save postprocessed record ID {postprocessed_record.id}: {e}")
-            print(f"Failed to save postprocessed record ID {postprocessed_record.id}: {e}")
+            logging.error(f"Failed to save postprocessed record ID {postprocessed_record.record_id}: {e}")
+            print(f"Failed to save postprocessed record ID {postprocessed_record.record_id}: {e}")
             continue
         
     print(f"Postprocessing complete. Final data saved to {output_file}")
