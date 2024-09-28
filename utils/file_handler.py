@@ -93,86 +93,7 @@ def write_output_file(file_path, data):
     except Exception as e:
         logging.error(f"Error writing to output file '{file_path}': {e}")
 
-def append_to_output_file(file_path: str, records: Union[Dict[str, Any], List[Dict[str, Any]]]):
-    """
-    Append processed record(s) to the output file.
-    If a record with the same 'record_id' or 'id' exists, overwrite it.
-    If the file does not exist, create it.
 
-    Records are stored as JSON objects separated by double newlines.
-
-    :param file_path: Path to the output file.
-    :param records: A single dictionary or a list of dictionaries representing the processed record(s).
-    """
-    try:
-        # Normalize records to a list
-        if isinstance(records, dict):
-            records_to_add = [records]
-        elif isinstance(records, list):
-            records_to_add = records
-        else:
-            logger.error("The 'records' parameter must be a dictionary or a list of dictionaries.")
-            return
-
-        # Initialize a dictionary to hold existing records for quick lookup
-        existing_records_dict = {}
-
-        # Check if the output file exists and load existing records
-        if os.path.exists(file_path):
-            logger.debug(f"Output file '{file_path}' exists. Reading existing records.")
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = f.read()
-
-            if data.strip():
-                record_strings = data.strip().split('\n\n')
-                for record_str in record_strings:
-                    try:
-                        record = json.loads(record_str)
-                        # Use 'record_id' as the primary identifier, fallback to 'id' if necessary
-                        record_id = record.get('record_id') or record.get('id')
-                        if record_id:
-                            existing_records_dict[record_id] = record
-                        else:
-                            logger.warning("Existing record does not contain 'record_id' or 'id'. Skipping.")
-                    except json.JSONDecodeError as e:
-                        logger.error(f"JSON decoding error while reading '{file_path}': {e}")
-                        continue
-            else:
-                logger.debug(f"Output file '{file_path}' is empty. No existing records found.")
-        else:
-            logger.info(f"Output file '{file_path}' does not exist. It will be created.")
-
-        # Process each new record
-        for record in records_to_add:
-            if not isinstance(record, dict):
-                logger.warning("Skipping non-dictionary record.")
-                continue
-
-            # Use 'record_id' as the primary identifier, fallback to 'id' if necessary
-            record_id = record.get('record_id') or record.get('id')
-            if not record_id:
-                logger.error("Record does not contain a 'record_id' or 'id' field. Skipping.")
-                continue
-
-            if record_id in existing_records_dict:
-                logger.info(f"Overwriting existing record with ID: {record_id}.")
-            else:
-                logger.info(f"Appending new record with ID: {record_id}.")
-
-            # Update or add the record in the existing_records_dict
-            existing_records_dict[record_id] = record
-
-        # Write all records back to the file
-        with open(file_path, 'w', encoding='utf-8') as f:
-            for rec_id, rec in existing_records_dict.items():
-                json.dump(rec, f, ensure_ascii=False, indent=2)
-                f.write('\n\n')  # Separator between records
-
-        logger.debug(f"Successfully saved {len(existing_records_dict)} record(s) to '{file_path}'.")
-
-    except Exception as e:
-        logger.error(f"An error occurred in append_to_output_file: {e}")
-        
 def save_processed_record(record: Dict[str, Any], file_path: str):
     """
     Save a single processed record to the output file.
@@ -181,7 +102,7 @@ def save_processed_record(record: Dict[str, Any], file_path: str):
     :param record: Dictionary representing the processed record.
     :param file_path: Path to the output file.
     """
-    append_to_output_file(file_path, record)
+    output_2_jsonl(file_path, record)
 
 
 
@@ -213,7 +134,7 @@ def doc_to_docx_pipeline(input_doc_path, output_docx_path):
 
     # Step 3: Append the extracted contents to the main document
     if appended_docs:
-        combined_doc = append_documents(main_docx_path, appended_docs)
+        combined_doc = append_appendix_2_doc(main_docx_path, appended_docs)
         # Save the combined document to the specified output path
         combined_doc.save(output_docx_path)
         print(f"Combined document saved at: {output_docx_path}")
@@ -306,7 +227,7 @@ def process_ole_content(ole_content):
     return processed_docs
 
 
-def append_documents(main_doc_path, appended_docs):
+def append_appendix_2_doc(main_doc_path, appended_docs):
     """Append documents to the main document and return the combined document."""
     
     # Load the main document
@@ -393,7 +314,7 @@ def generate_unique_id(prefix: str = "REC") -> str:
 
 
 
-def append_to_output_file_jsonl(file_path: str, records: Union[Dict[str, Any], List[Dict[str, Any]]]):
+def output_2_jsonl(file_path: str, records: Union[Dict[str, Any], List[Union[Dict[str, Any], Any]]]):
     """
     Append processed record(s) to the output file in JSONL format.
     If a record with the same 'record_id' or 'id' exists, overwrite it.
@@ -402,16 +323,25 @@ def append_to_output_file_jsonl(file_path: str, records: Union[Dict[str, Any], L
     Records are stored as JSON objects, one per line.
 
     :param file_path: Path to the output file.
-    :param records: A single dictionary or a list of dictionaries representing the processed record(s).
+    :param records: A single dictionary, a Record instance, or a list of them representing the processed record(s).
     """
     try:
-        # Normalize records to a list
+        # Normalize records to a list of dicts
+        records_to_add = []
         if isinstance(records, dict):
-            records_to_add = [records]
+            records_to_add.append(records)
         elif isinstance(records, list):
-            records_to_add = records
+            for record in records:
+                if isinstance(record, dict):
+                    records_to_add.append(record)
+                elif hasattr(record, 'to_dict') and callable(getattr(record, 'to_dict')):
+                    records_to_add.append(record.to_dict())
+                else:
+                    logger.warning("Skipping record that is neither a dict nor has a 'to_dict' method.")
+        elif hasattr(records, 'to_dict') and callable(getattr(records, 'to_dict')):
+            records_to_add.append(records.to_dict())
         else:
-            logger.error("The 'records' parameter must be a dictionary or a list of dictionaries.")
+            logger.error("The 'records' parameter must be a dictionary, a Record instance with 'to_dict', or a list of them.")
             return
 
         # Initialize a dictionary to hold existing records for quick lookup
@@ -468,4 +398,4 @@ def append_to_output_file_jsonl(file_path: str, records: Union[Dict[str, Any], L
         logger.debug(f"Successfully saved {len(existing_records_dict)} record(s) to '{file_path}'.")
 
     except Exception as e:
-        logger.error(f"An error occurred in append_to_output_file_jsonl: {e}")
+        logger.error(f"An error occurred in output_to_jsonl: {e}")

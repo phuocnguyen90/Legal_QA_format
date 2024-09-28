@@ -130,7 +130,7 @@ class Preprocessor:
                 return None
 
             # Initialize a new Record object from the formatted output
-            processed_record = Record.from_json(formatted_output)
+            processed_record = Record.parse_record(formatted_output)
             if not processed_record:
                 logger.error(f"Processed data for record ID {preprocessed_record.record_id} is invalid.")
                 return None

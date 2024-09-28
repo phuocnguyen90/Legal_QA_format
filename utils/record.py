@@ -77,7 +77,6 @@ class Record:
         self.summary = summary
 
         
-        llm_formatter = LLMFormatter
 
     @classmethod
     def from_tagged_text(cls, text: str, record_type: str = "DOC") -> Optional['Record']:
@@ -97,21 +96,29 @@ class Record:
             return None
 
     @classmethod
-    def from_json(cls, json_str: str) -> Optional['Record']:
+    def from_json(cls, data: Dict[str, Any]) -> Optional['Record']:
         """
-        Initialize a Record object from a JSON string.
-        
-        :param json_str: JSON string representing the record.
-        :return: Record object or None if parsing fails.
+        Create a Record instance from a JSON dictionary.
         """
         try:
-            data = json.loads(json_str)
-            return cls.from_dict(data)
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON decoding error: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Error parsing JSON into Record: {e}")
+            return cls(
+                record_id=data.get('record_id') or data.get('id') or generate_unique_id(),
+                document_id=data.get('document_id'),
+                title=data['title'],
+                content=data['content'],
+                chunk_id=data.get('chunk_id'),
+                hierarchy_level=data.get('hierarchy_level', 1),
+                categories=data.get('categories', []),
+                relationships=data.get('relationships', []),
+                published_date=data.get('published_date'),
+                source=data.get('source'),
+                processing_timestamp=data.get('processing_timestamp', pd.Timestamp.now().isoformat()),
+                validation_status=data.get('validation_status', False),
+                language=data.get('language', 'vi'),
+                summary=data.get('summary', '')
+            )
+        except KeyError as e:
+            logger.error(f"Missing required field: {e}")
             return None
 
     @classmethod
@@ -185,9 +192,7 @@ class Record:
 
     def to_dict(self) -> Dict[str, Any]:
         """
-        Convert the Record object to a dictionary.
-        
-        :return: Dictionary representation of the Record.
+        Convert the Record instance to a dictionary.
         """
         return {
             "record_id": self.record_id,
@@ -205,7 +210,6 @@ class Record:
             "language": self.language,
             "summary": self.summary
         }
-
     def to_json(self) -> str:
         """
         Convert the Record object to a JSON string.
@@ -287,7 +291,7 @@ class Record:
         record_str: str,
         return_type: str = "record",
         record_type: str = "DOC",
-        llm_formatter: Optional[LLMFormatter] = None
+        llm_formatter: Optional[Any] = None  # Adjusted type hint for flexibility
     ) -> Optional[Union['Record', Dict[str, Any], str]]:
         """
         Parse a record string into a Record object, dictionary, or JSON string.
@@ -308,31 +312,28 @@ class Record:
             # Detect the input text type
             text_type = detect_text_type(record_str)
             logger.debug(f"Detected text type: {text_type}")
-            
-            if text_type == "unformatted":
-                # Handle unformatted text
-                logger.debug("Input is detected as unformatted text format.")
 
+            # If input is unformatted, use LLMFormatter to convert to tagged format
+            if text_type == "unformatted":
                 if not llm_formatter:
                     logger.error("LLMFormatter instance is required to process unformatted text.")
                     return None
-
-                # Use LLMFormatter to convert unformatted text to tagged format
+                logger.info("Converting unformatted text to tagged format using LLMFormatter.")
                 formatted_text = llm_formatter.format_text(raw_text=record_str, mode="tagged")
                 if not formatted_text:
                     logger.error("LLMFormatter failed to format unformatted text.")
                     return None
                 record_str = formatted_text  # Update record_str to tagged format
-                logger.debug("Successfully converted unformatted text to tagged format. Proceed as a tagged text")
                 text_type = "tagged"  # Update text_type after conversion
+                logger.debug("Successfully converted unformatted text to tagged format.")
 
-
-            elif text_type == "json":
-                # Attempt to parse as JSON
+            # Process based on text_type
+            if text_type == "json":
+                # Parse JSON and create Record
                 try:
                     data = json.loads(record_str)
                     logger.debug("Input is detected as JSON format.")
-                    record = cls.from_dict(data)
+                    record = cls.from_json(data)
                     if record:
                         logger.info(f"Record parsed successfully from JSON with ID: {record.record_id}")
                     else:
@@ -341,19 +342,7 @@ class Record:
                     logger.error(f"JSON decoding error: {e}")
                     return None
 
-                if return_type == "record":
-                    return record
-                elif return_type == "dict":
-                    return data
-                elif return_type == "json":
-                    return json.dumps(data, ensure_ascii=False, indent=2)
-                else:
-                    logger.error(f"Invalid return_type '{return_type}' specified. Choose from 'record', 'dict', 'json'.")
-                    return None
-
             elif text_type == "tagged":
-                # Parse as tagged text
-                logger.debug("Parsing input as tagged text format.")
                 # Extract fields using regular expressions with flexible ID patterns
                 record_id_match = re.search(r'<id=([A-Za-z]{2,3}_[A-Za-z0-9]+)>', record_str)
                 document_id_match = re.search(r'<document_id=([A-Za-z]{2,3}_[A-Za-z0-9]+)>', record_str)
@@ -412,26 +401,25 @@ class Record:
                 }
 
                 # Create Record instance
-                record = cls.from_dict(record_dict)
+                record = cls.from_json(record_dict)
                 if record:
                     logger.info(f"Record parsed successfully from tagged text with ID: {record.record_id}")
                 else:
                     logger.warning("Failed to create Record from tagged text data.")
 
-                if return_type == "record":
-                    return record
-                elif return_type == "dict":
-                    return record_dict
-                elif return_type == "json":
-                    return json.dumps(record_dict, ensure_ascii=False, indent=2)
-                else:
-                    logger.error(f"Invalid return_type '{return_type}' specified. Choose from 'record', 'dict', 'json'.")
-                    return None
-
-                
-
             else:
-                logger.error("Unknown text type detected. Cannot parse the record.")
+                logger.error(f"Unsupported text type: {text_type}")
+                return None
+
+            # Return based on return_type
+            if return_type == "record":
+                return record
+            elif return_type == "dict":
+                return record_dict
+            elif return_type == "json":
+                return json.dumps(record_dict, ensure_ascii=False, indent=2)
+            else:
+                logger.error(f"Invalid return_type '{return_type}' specified. Choose from 'record', 'dict', 'json'.")
                 return None
 
         except Exception as e:

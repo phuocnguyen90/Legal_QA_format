@@ -63,8 +63,10 @@ class GroqProvider(APIProvider):
             if not content:
                 logger.error("Empty content received in the response from Groq API.")
                 return None
+            logger.debug(f"Content received {content}")
 
             return content
+            
 
         except Exception as e:
             logger.error(f"Error during Groq API call: {e}")

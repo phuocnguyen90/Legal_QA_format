@@ -7,7 +7,7 @@ import os
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.file_handler import read_input_file,  append_to_output_file, load_record
+from utils.file_handler import read_input_file, output_2_jsonl, load_record
 from utils.validation import load_schema, validate_record
 from utils.validation import mask_api_key
 from utils.load_config import load_config
@@ -91,7 +91,7 @@ def main_postprocessing():
         
         # Save postprocessed record
         try:
-            append_to_output_file(output_file, postprocessed_record.to_dict())
+            output_2_jsonl(output_file, postprocessed_record.to_dict())
             logging.info(f"Record ID {postprocessed_record.record_id} postprocessed and saved successfully.")
         except Exception as e:
             logging.error(f"Failed to save postprocessed record ID {postprocessed_record.record_id}: {e}")
