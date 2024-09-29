@@ -1,50 +1,75 @@
 # providers/ollama_provider.py
 
 import logging
-import subprocess
-import json
+import requests  # Make sure the requests library is installed
 from providers.api_provider import APIProvider
+from typing import Optional, List, Dict, Any
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class OllamaProvider(APIProvider):
-    def __init__(self, config, requirements):
-        super().__init__(config, requirements)
-        self.model_path = config['model_path']
-        self.temperature = config.get('temperature', 0.7)
-        self.max_output_tokens = config.get('max_output_tokens', 4096)
-        logging.info("OllamaProvider initialized successfully.")
+    """
+    A modular provider for interacting with the Ollama API.
+    """
 
-    def process_record(self, record):
+    def __init__(self, config: Dict[str, Any], requirements: str):
         """
-        Process the record using the local Ollama LLM.
+        Initialize the OllamaProvider with the specified configuration.
+
+        :param config: Configuration dictionary containing API keys and settings.
+        :param requirements: Preprocessing requirements as a string.
+        """
+        super().__init__(config, requirements)  # Pass both config and requirements to the parent
+        try:
+            self.base_url = config.get("ollama_api_url", "http://localhost:11434")  # Default to local Ollama instance
+            self.model_name = config.get('model_name', "llama3.1")
+            logger.info("OllamaProvider initialized successfully.")
+        except Exception as e:
+            logger.error(f"Failed to initialize OllamaProvider: {e}")
+            raise
+
+    def send_message(self, prompt: str, stop_sequence: Optional[List[str]] = None) -> Optional[str]:
+        """
+        Send a message to the Ollama API and retrieve the response.
+
+        :param prompt: The prompt to send to Ollama.
+        :param stop_sequence: Optional list of stop sequences to terminate the LLM response.
+        :return: The response content from Ollama or None if the call fails.
         """
         try:
-            prompt = f"""Please process the following data according to these requirements:
+            logger.debug("Sending prompt to Ollama API.")
+            payload = {
+                "model": self.model_name,
+                "prompt": prompt,
+                "stream": False
+            }
 
-        {self.requirements}
+            response = requests.post(f"{self.base_url}/api/generate", json=payload)
 
-        Here is the data:
 
-        {record}
 
-        Please provide the processed data in the same format, ensuring that all modifications adhere to the requirements."""
-
-            # Example command to interact with Ollama (adjust as needed)
-            process = subprocess.Popen(
-                ['ollama', 'prompt', self.model_path],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            stdout, stderr = process.communicate(input=prompt)
-
-            if process.returncode != 0:
-                logging.error(f"OllamaProvider error: {stderr}")
+            # Check for response status
+            if response.status_code != 200:
+                logger.error(f"Failed to get a valid response from Ollama API: {response.status_code} {response.text}")
                 return None
 
-            processed_data = stdout.strip()
-            return processed_data
+            result = response.json()
+
+            # Check if the response contains the expected data
+            if "text" not in result:
+                logger.error("Invalid response structure from Ollama API.")
+                return None
+
+            content = result["text"].strip()
+            if not content:
+                logger.error("Empty content received in the response from Ollama API.")
+                return None
+
+            logger.debug(f"Content received: {content}")
+            return content
+            
         except Exception as e:
-            logging.error(f"Error processing record with OllamaProvider: {e}")
+            logger.error(f"Error during Ollama API call: {e}")
             return None

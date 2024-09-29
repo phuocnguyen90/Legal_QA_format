@@ -1,68 +1,75 @@
 # providers/openai_provider.py
 
 import logging
-import openai
+import openai  # Make sure the OpenAI library is installed
 from providers.api_provider import APIProvider
-from typing import List, Optional, Dict, Any
+from typing import Optional, List, Dict, Any
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class OpenAIProvider(APIProvider):
-    def __init__(self, config, requirements):
-        super().__init__(config, requirements)
-        openai.api_key = config['api_key']
-        self.model_name = config.get('model_name', "gpt-3.5-turbo")
-        self.temperature = config.get('temperature', 0.7)
-        self.max_tokens = config.get('max_output_tokens', 4096)
-        logging.info("OpenAIProvider initialized successfully.")
+    """
+    A modular provider for interacting with the OpenAI API.
+    """
 
-    def process_record(self, record):
+    def __init__(self, config: Dict[str, Any], requirements: str):
         """
-        Process the record using the OpenAI API.
+        Initialize the OpenAIProvider with the specified configuration.
+
+        :param config: Configuration dictionary containing API keys and settings.
+        :param requirements: Preprocessing requirements as a string.
+        """
+        super().__init__(config, requirements)  # Pass both config and requirements to the parent
+        try:
+            api_key = config.get("api_key")
+            if not api_key:
+                logger.error("OpenAI API key is missing.")
+                raise ValueError("OpenAI API key is missing.")
+            openai.api_key = api_key  # Set the OpenAI API key
+            
+            self.model_name = config.get("model_name", "gpt-3.5-turbo")  # Default to GPT-3.5 Turbo
+            self.temperature = config.get("temperature", 0.7)
+            self.max_output_tokens = config.get("max_output_tokens", 150)  # Adjust max tokens as needed
+            
+            logger.info("OpenAIProvider initialized successfully.")
+        except Exception as e:
+            logger.error(f"Failed to initialize OpenAIProvider: {e}")
+            raise
+
+    def send_message(self, prompt: str, stop_sequence: Optional[List[str]] = None) -> Optional[str]:
+        """
+        Send a message to the OpenAI API and retrieve the response.
+
+        :param prompt: The prompt to send to OpenAI.
+        :param stop_sequence: Optional list of stop sequences to terminate the LLM response.
+        :return: The response content from OpenAI or None if the call fails.
         """
         try:
-            prompt = f"""Please process the following data according to these requirements:
-
-            {self.requirements}
-
-            Here is the data:
-
-            {record}
-
-            Please provide the processed data in the same format, ensuring that all modifications adhere to the requirements."""
-
-            response = openai.ChatCompletion.create(
+            logger.debug("Sending prompt to OpenAI API.")
+            
+            response = openai.chat.completions.create(
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=self.temperature,
-                max_tokens=self.max_tokens
+                max_tokens=self.max_output_tokens,
+                stop=stop_sequence
             )
+            logger.debug("Received response from OpenAI API.")
 
-            processed_data = response.choices[0].message.content.strip()
-            return processed_data
+            if not response or not hasattr(response, 'choices') or not response.choices:
+                logger.error("Invalid or empty response structure from OpenAI API.")
+                return None
+
+            content = response.choices[0].message.content.strip()
+            if not content:
+                logger.error("Empty content received in the response from OpenAI API.")
+                return None
+            
+            logger.debug(f"Content received: {content}")
+            return content
+            
         except Exception as e:
-            logging.error(f"Error processing record with OpenAIProvider: {e}")
+            logger.error(f"Error during OpenAI API call: {e}")
             return None
-        
-    def format_text(self, prompt: str, stop_sequence: Optional[List[str]] = None) -> str:
-            """
-            Format text using OpenAI's Completion API.
-
-            :param prompt: The prompt to send to OpenAI.
-            :param stop_sequence: Optional list of stop sequences to terminate the LLM response.
-            :return: The formatted text returned by OpenAI.
-            """
-            try:
-                response = openai.ChatCompletion.create(
-                    model=self.model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.3,
-                    max_tokens=500,
-                    n=1,
-                    stop=stop_sequence
-                )
-                formatted_text = response.choices[0].message.content.strip()
-                logging.debug("Received response from OpenAI.")
-                return formatted_text
-            except Exception as e:
-                logging.error(f"OpenAI formatting failed: {e}")
-                return ""

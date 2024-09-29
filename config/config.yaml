@@ -1,6 +1,6 @@
 # config.yaml
 
-provider: groq  # Options: groq, google_gemini
+provider: google_gemini  # Options: groq, google_gemini
 
 groq:
   api_key: ${GROQ_API_KEY}
@@ -11,7 +11,7 @@ groq:
 
 openai:
   api_key: ${OPENAI_API_KEY}
-  model_name: "gpt-3.5-turbo"
+  model_name: "gpt-4o-mini"
   temperature: 0.7
   max_output_tokens: 4096
   # Add other Groq-specific settings if necessary
@@ -20,10 +20,10 @@ openai:
 google_gemini:
   api_key: ${GEMINI_API_KEY}
   model_name: "gemini-1.5-flash"
-  temperature: 1
+  temperature: 0.7
   top_p: 0.95
   top_k: 64
-  max_output_tokens: 8192
+  max_output_tokens: 2048
   # Add other Google Gemini-specific settings if necessary
 
 processing:
@@ -41,6 +41,8 @@ processing:
 
 ollama:
   api_key: ollama
+  model_name: "llama3.1"
   model_path: "/path/to/ollama/model"
   temperature: 0.7
   max_output_tokens: 4096
+  ollama_api_url: "http://localhost:11434"

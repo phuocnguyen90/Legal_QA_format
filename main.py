@@ -45,8 +45,8 @@ def main():
 
     # Define input and output file paths
     # input_file = config['processing']['input_file']
-    # input_file="data\\raw\\ND-01-2020.docx"
-    input_file="data\\raw\\input.txt"
+    input_file="data\\raw\\ND-01-2020.docx"
+    # input_file="data\\raw\\input.txt"
     output_file = config['processing']['preprocessed_file']
 
 
