@@ -42,8 +42,8 @@ class Preprocessor:
         :return: An instance of LLMFormatter.
         """
         try:
-            prompts_path = self.config.get('prompts_path', 'config/schemas/prompts.yaml')
-            llm_formatter = LLMFormatter(config=self.config, prompts_path=prompts_path)
+            # Reuse the singleton instance
+            llm_formatter = LLMFormatter(config=self.config)
             return llm_formatter
         except Exception as e:
             logger.error(f"Failed to initialize LLMFormatter: {e}")

@@ -19,19 +19,21 @@ class LLMFormatter:
     """
     Unified LLM Formatter supporting multiple formatting and enrichment modes and providers.
     """
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if not cls._instance:
+            cls._instance = super(LLMFormatter, cls).__new__(cls)
+        return cls._instance
 
     def __init__(self, config: Dict[str, Any], prompts_path: str = "config/schemas/prompts.yaml"):
-        """
-        Initialize the LLMFormatter with the specified provider and load prompts.
-
-        :param config: Configuration dictionary containing API keys and settings.
-        :param prompts_path: Path to the YAML file containing prompts.
-        """
-        self.config = config
-        self.prompts = self._load_prompts(prompts_path)
-        self.provider_name = self.config.get('provider', 'openai').lower()
-        self.provider = self._initialize_provider()
-        logger.info(f"LLMFormatter initialized with provider '{self.provider_name}'.")
+        if not hasattr(self, 'initialized'):  # Avoid re-initializing
+            self.config = config
+            self.prompts = self._load_prompts(prompts_path)
+            self.provider_name = self.config.get('provider', 'openai').lower()
+            self.provider = self._initialize_provider()
+            self.initialized = True  # Mark as initialized
+            logger.info(f"LLMFormatter initialized with provider '{self.provider_name}'.")
 
     def _load_prompts(self, prompts_path: str) -> Dict[str, Any]:
         """

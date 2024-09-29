@@ -11,12 +11,7 @@ from tasks.postprocessing import main_postprocessing
 from utils.input_processor import InputProcessor
 from utils.file_handler import output_2_jsonl
 def main():
-
- 
-    # Add the handler to the root logger
-    setup_logging
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)  # Set the desired logging level
+    
 
     # Load configuration
     try:
@@ -24,6 +19,12 @@ def main():
     except Exception as e:
         print(f"Failed to load configuration: {e}")
         return
+    
+    # Load the logger
+    setup_logging(config.get("processing").get("log_file"))    
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)  # Set the desired logging level
+    
 
 
      # Initialize InputProcessor
@@ -44,9 +45,9 @@ def main():
         return
 
     # Define input and output file paths
-    # input_file = config['processing']['input_file']
-    input_file="data\\raw\\ND-01-2020.docx"
-    # input_file="data\\raw\\input.txt"
+    input_file = config['processing']['input_file']
+    # input_file="data\\raw\\ND-01-2020.docx"
+    # input_file="data\\raw\\test_input.txt"
     output_file = config['processing']['preprocessed_file']
 
 

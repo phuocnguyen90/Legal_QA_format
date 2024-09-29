@@ -30,21 +30,13 @@ class InputProcessor:
 
 
     def __init__(self, config: Dict[str, Any]):
-        """
-        Initialize the InputProcessor with the given configuration.
-
-        :param config: Configuration dictionary.
-        """
         self.config = config
         self.preprocessor = self._initialize_preprocessor()
         logger.info("InputProcessor initialized with provided configuration.")
 
-    def _initialize_preprocessor(self) -> Preprocessor:
-        """
-        Initialize the Preprocessor with the given configuration.
 
-        :return: An instance of Preprocessor.
-        """
+    def _initialize_preprocessor(self) -> Preprocessor:
+        """ Initialize the Preprocessor with a shared LLMFormatter. """
         try:
             preprocessor = Preprocessor(config=self.config)
             return preprocessor
