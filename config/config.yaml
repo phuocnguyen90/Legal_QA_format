@@ -31,6 +31,7 @@ processing:
   preprocessed_file: "data/preprocessed/preprocessed_data.jsonl"
   processed_file: "data/processed/processed_data.jsonl"
   final_output_file: "data/processed/result.jsonl"
+  document_db: "data/doc_db.csv"
   log_file: "logs/processing.log"
   delay_between_requests: 1  # in seconds
   processing: True

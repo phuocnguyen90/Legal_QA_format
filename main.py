@@ -23,7 +23,7 @@ def main():
     # Load the logger
     setup_logging(config.get("processing").get("log_file"))    
     logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)  # Set the desired logging level
+    logger.setLevel(logging.INFO)  # Set the desired logging level
     
 
 

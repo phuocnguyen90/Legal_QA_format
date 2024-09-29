@@ -8,7 +8,8 @@ from providers import ProviderFactory
 from providers.openai_provider import OpenAIProvider
 from providers.groq_provider import GroqProvider
 from providers.api_provider import APIProvider
-from utils.validation import detect_text_type
+from utils.validation import detect_text_type, is_english
+from utils.record import Record
 # logging.getLogger(__name__)
 
 # Configure logging
@@ -212,3 +213,34 @@ class LLMFormatter:
         except Exception as e:
             logger.error(f"Failed to initialize provider '{provider}': {e}")
             raise
+
+    def translate(self, record:Record) -> None:
+        """ 
+        Translate the title and content of the record to Vietnamese if they are in English.
+        Uses the LLM to perform the translation and updates the record object directly.
+        """
+        try:
+            # Translate title if it is in English
+            if is_english(record.title):
+                logger.info(f"Translating title for record ID {record.record_id} to Vietnamese.")
+                title_prompt = f"Translate the following English text to Vietnamese: '{record.title}'"
+                translated_title = self.provider.send_message(title_prompt)
+                if translated_title:
+                    record.title = translated_title.strip()  # Update title with translated text
+                else:
+                    logger.warning(f"Translation for title of record ID {record.record_id} failed or returned empty.")
+
+            # Translate content if it is in English
+            if is_english(record.content):
+                logger.info(f"Translating content for record ID {record.record_id} to Vietnamese.")
+                content_prompt = f"Translate the following English text to Vietnamese: '{record.content}'"
+                translated_content = self.provider.send_message(content_prompt)
+                if translated_content:
+                    record.content = translated_content.strip()  # Update content with translated text
+                else:
+                    logger.warning(f"Translation for content of record ID {record.record_id} failed or returned empty.")
+
+            logger.info(f"Translation completed for record ID {record.record_id}.")
+        except Exception as e:
+            logger.error(f"Error during translation for record ID {record.record_id}: {e}")
+

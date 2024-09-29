@@ -37,7 +37,7 @@ class Record:
         categories: Optional[List[str]] = None,
         relationships: Optional[List[str]] = None,
         published_date: Optional[str] = None,
-        source: Optional[str] = None,
+        source: Optional[List[str]] = None,
         processing_timestamp: Optional[str] = None,
         validation_status: Optional[bool] = None,
         language: Optional[str] = 'vi',

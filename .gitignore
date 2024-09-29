@@ -162,4 +162,5 @@ cython_debug/
 *.txt
 *.jsonl
 *.docx
+*.csv
 !requirements.txt

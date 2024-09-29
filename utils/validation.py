@@ -4,6 +4,7 @@ import json
 import yaml
 import logging
 import re
+from langdetect import detect
 from providers.groq_provider import GroqProvider
 from jsonschema import validate, ValidationError
 from typing import Dict, Any, Optional
@@ -196,3 +197,9 @@ def detect_text_type(text: str) -> str:
     
     logger.debug("Input detected as unformatted text.")
     return "unformatted"
+
+def is_english(text):
+    try:
+        return detect(text) == 'en'
+    except Exception as e:
+        return False
