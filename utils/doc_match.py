@@ -17,9 +17,45 @@ class DocumentMatcher:
         try:
             self.documents = self.load_documents(csv_path)
             logger.info("Successfully loaded document database.")
+            # Separate documents by type for Luật, Bộ luật, Pháp lệnh
+            self.luat_documents = [doc for doc in self.documents if doc['Full Name'].startswith(('Luật', 'Bộ luật', 'Pháp lệnh'))]
+            logger.debug(f"Loaded {len(self.luat_documents)} Luật/Bộ luật/Pháp lệnh documents.")
+            # Create a mapping for issuers from Thông tư documents
+            
         except Exception as e:
             logger.error(f"Cannot load document database with error: {e}")
             raise
+    def preprocess_database(self):
+        """
+        Preprocess the document database to facilitate partial matching.
+        """
+        self.partial_mapping = {}
+        # Define abbreviations for document types
+        self.abbreviations = {
+            "Nghị định": "NĐ",
+            "Thông tư": "TT",
+            "Thông tư liên tịch": "TTLT",
+            "Pháp lệnh": "PL",
+            "Nghị quyết":"NQ"
+            # Add more abbreviations as needed
+        }
+
+        # Create a mapping from (Document Type, Year) to full mentions
+        for doc in self.documents:
+            full_name = doc['Full Name']
+            doc_id = doc['Document_ID']
+            issued_date = doc['Issued Date']
+            # Extract document type and year from full_name
+            match = re.match(r"(Luật|Bộ luật|Pháp lệnh|Nghị định|Thông tư(?: liên tịch)?|Nghị quyết|Quyết định)\s+(\d{1,3}/\d{4})", full_name, re.UNICODE)
+            if match:
+                doc_type = match.group(1)
+                doc_year = match.group(2).split('/')[1]  # Extract year part
+                key = (doc_type, doc_year)
+                if key not in self.partial_mapping:
+                    self.partial_mapping[key] = []
+                self.partial_mapping[key].append(full_name)
+        logger.debug(f"Preprocessed partial mapping: {self.partial_mapping}")
+
 
     def load_documents(self, csv_path: str) -> List[Dict[str, str]]:
         """ 
@@ -100,6 +136,25 @@ class DocumentMatcher:
                     mentions.add(full_mention)
                     logger.info(f"Extracted mention from second category: {full_mention}")
 
+        
+            # 3. Handle partial mentions if no full mentions are found
+            if not mentions:
+                logger.debug("No full mentions found. Attempting to extract partial mentions.")
+                partial_pattern = r"(Luật|Bộ luật|Pháp lệnh|Nghị định|Thông tư(?: liên tịch)?|Nghị quyết|Quyết định)\s+\d{1,3}/\d{4}"
+                partial_matches = re.finditer(partial_pattern, text, re.UNICODE)
+                for match in partial_matches:
+                    doc_type = match.group(1)
+                    partial_id = match.group(2)  # e.g., "92/2012"
+                    key = (doc_type, partial_id.split('/')[1])  # (Document Type, Year)
+                    logger.debug(f"Partial mention found: {match.group(0)}. Looking up in partial mapping with key: {key}")
+                    if key in self.partial_mapping:
+                        # If multiple full mentions match, add all
+                        for full_name in self.partial_mapping[key]:
+                            mentions.add(full_name)
+                            logger.debug(f"Reconstructed full mention from partial: {full_name}")
+                    else:
+                        logger.debug(f"No matching full mention found for partial key: {key}")
+
         unique_mentions = list(mentions)
         logger.info(f"Unique document mentions after processing: {unique_mentions}")
         return unique_mentions
@@ -178,7 +233,7 @@ test_record = """{
     "record_id": "QA_0D20EC2D",
     "document_id": "N/A",
     "title": "Thủ tục cấp lại Giấy phép sản xuất rượu thủ công",
-    "content": "Căn cứ pháp lý:\\nThông tư 77/2012/TT-BTC;\\nNghị định 92/2012/NĐ-CP;\\nThông tư 60/2019/TT-BCT.\\n\\nI/ Trình tự thực hiện\\nBước 1:Các tổ chức, cá nhân tự chuẩn bị đầy đủ hồ sơ theo quy định của pháp luật và nộp hồ sơ tại Bộ phận tiếp nhận và trả kết quả của Ủy ban nhân dân cấp xã.\\nBước 2: Công chức tiếp nhận và kiểm tra hồ sơ.\\nBước 3: Công chức tiếp nhận hồ sơ chuyển hồ sơ đến cán bộ phụ trách để thẩm định.\\nBước 4: Đến ngày hẹn ghi trong Giấy tiếp nhận hồ sơ và hẹn trả kết quả, cá nhân đến Bộ phận tiếp nhận và trả kết quả của Ủy ban nhân dân cấp xã, ký nhận kết quả thủ tục hành chính và nộp lại Giấy tiếp nhận hồ sơ và hẹn trả kết quả.\\n\\nII/ Cách thức thực hiện: Gửi hồ sơ qua đường bưu điện hoặc nộp trực tiếp tại Bộ phận tiếp nhận và trả kết quả giải quyết thủ tục hành chính của UBND cấp xã.\\n\\nIII/ Thành phần hồ sơ: (01 bộ)\\n– Trường hợp cấp lại do hết thời hạn hiệu lực: + Giấy đăng ký sản xuất rượu thủ công để bán cho các doanh nghiệp có Giấy phép sản xuất rượu để chế biến lại; + Bản sao Hợp đồng mua bán giữa tổ chức, cá nhân đề nghị đăng ký sản xuất rượu thủ công và doanh nghiệp có Giấy phép sản xuất rượu để chế biến lại rượu.\\n– Trường hợp Giấy xác nhận đăng ký sản xuất rượu thủ công để bán cho doanh nghiệp có Giấy phép sản xuất rượu để chế biến lại bị mất, bị tiêu hủy toàn bộ hoặc một phần, bị rách, nát hoặc bị cháy : – Giấy đăng ký cấp lại. – Bản gốc hoặc bản sao Giấy xác nhận đăng ký sản xuất rượu thủ công để bán cho doanh nghiệp có Giấy phép sản xuất rượu để chế biến lại.\\n\\nIV/ Thời hạn giải quyết\\nTrong thời hạn 10 (mười) ngày làm việc, kể từ ngày nhận đủ hồ sơ hợp lệ theo quy định. Ủy ban nhân dân cấp Xã xem xét và cấp lại Giấy xác nhận đăng ký sản xuất rượu thủ công để bán cho doanh nghiệp có Giấy phép sản xuất rượu để chế biến lại.\\n\\nV/ Cơ quan có thẩm quyền: Ủy ban nhân dân cấp xã\\nVI/ Phí, lệ phí:\\nLệ phí cấp lại Giấy xác nhận đăng ký sản xuất rượu thủ công để bán cho doanh nghiệp có Giấy phép sản xuất rượu để chế biến lại.",
+    "content": "Căn cứ pháp lý:\\nThông tư 77/2012;\\nNghị định 92/2012;\\nThông tư 60/2019.\\n\\nI/ Trình tự thực hiện\\nBước 1:Các tổ chức, cá nhân tự chuẩn bị đầy đủ hồ sơ theo quy định của pháp luật và nộp hồ sơ tại Bộ phận tiếp nhận và trả kết quả của Ủy ban nhân dân cấp xã.\\nBước 2: Công chức tiếp nhận và kiểm tra hồ sơ.\\nBước 3: Công chức tiếp nhận hồ sơ chuyển hồ sơ đến cán bộ phụ trách để thẩm định.\\nBước 4: Đến ngày hẹn ghi trong Giấy tiếp nhận hồ sơ và hẹn trả kết quả, cá nhân đến Bộ phận tiếp nhận và trả kết quả của Ủy ban nhân dân cấp xã, ký nhận kết quả thủ tục hành chính và nộp lại Giấy tiếp nhận hồ sơ và hẹn trả kết quả.\\n\\nII/ Cách thức thực hiện: Gửi hồ sơ qua đường bưu điện hoặc nộp trực tiếp tại Bộ phận tiếp nhận và trả kết quả giải quyết thủ tục hành chính của UBND cấp xã.\\n\\nIII/ Thành phần hồ sơ: (01 bộ)\\n– Trường hợp cấp lại do hết thời hạn hiệu lực: + Giấy đăng ký sản xuất rượu thủ công để bán cho các doanh nghiệp có Giấy phép sản xuất rượu để chế biến lại; + Bản sao Hợp đồng mua bán giữa tổ chức, cá nhân đề nghị đăng ký sản xuất rượu thủ công và doanh nghiệp có Giấy phép sản xuất rượu để chế biến lại rượu.\\n– Trường hợp Giấy xác nhận đăng ký sản xuất rượu thủ công để bán cho doanh nghiệp có Giấy phép sản xuất rượu để chế biến lại bị mất, bị tiêu hủy toàn bộ hoặc một phần, bị rách, nát hoặc bị cháy : – Giấy đăng ký cấp lại. – Bản gốc hoặc bản sao Giấy xác nhận đăng ký sản xuất rượu thủ công để bán cho doanh nghiệp có Giấy phép sản xuất rượu để chế biến lại.\\n\\nIV/ Thời hạn giải quyết\\nTrong thời hạn 10 (mười) ngày làm việc, kể từ ngày nhận đủ hồ sơ hợp lệ theo quy định. Ủy ban nhân dân cấp Xã xem xét và cấp lại Giấy xác nhận đăng ký sản xuất rượu thủ công để bán cho doanh nghiệp có Giấy phép sản xuất rượu để chế biến lại.\\n\\nV/ Cơ quan có thẩm quyền: Ủy ban nhân dân cấp xã\\nVI/ Phí, lệ phí:\\nLệ phí cấp lại Giấy xác nhận đăng ký sản xuất rượu thủ công để bán cho doanh nghiệp có Giấy phép sản xuất rượu để chế biến lại.",
     "chunk_id": "N/A",
     "hierarchy_level": 1,
     "categories": ["Thủ Tục Hành Chính"],
