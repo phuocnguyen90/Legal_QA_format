@@ -10,7 +10,7 @@ import PyPDF2
 from bs4 import BeautifulSoup
 from logging_setup import setup_logging
 from load_config import load_config
-
+from file_handler import doc_to_docx
 
 
 # Configure logger
@@ -105,6 +105,28 @@ def extract_text_from_docx(file_path):
     except Exception as e:
         logger.error(f"Error reading DOCX file {file_path}: {e}")
         return ""
+    
+def extract_text_from_doc(file_path):
+    """
+    Extracts text from a .docx file.
+    
+    Args:
+        file_path (str): Path to the .docx file.
+        
+    Returns:
+        str: Extracted text.
+    """
+    try:
+        doc=doc_to_docx(file_path)        
+        full_text = []
+        for para in doc.paragraphs:
+            full_text.append(para.text)
+        text = '\n'.join(full_text)
+        logger.info(f"Extracted text from DOC file: {file_path}")
+        return text
+    except Exception as e:
+        logger.error(f"Error reading DOC file {file_path}: {e}")
+        return ""
 
 def extract_text_from_pdf(file_path):
     """
@@ -164,6 +186,8 @@ def determine_file_type(file_path):
     ext = ext.lower()
     if ext == '.txt':
         return 'txt'
+    elif ext=='.doc':
+        return 'doc'
     elif ext == '.docx':
         return 'docx'
     elif ext == '.pdf':
@@ -188,6 +212,8 @@ def extract_text(file_path):
         return extract_text_from_txt(file_path)
     elif file_type == 'docx':
         return extract_text_from_docx(file_path)
+    elif file_type == 'doc':
+        return extract_text_from_doc(file_path)
     elif file_type == 'pdf':
         return extract_text_from_pdf(file_path)
     elif file_type == 'html':
@@ -556,8 +582,8 @@ def reconstruct_text(json_file_path):
 
 if __name__ == "__main__":
     # Example file paths (Adjust these paths accordingly)
-    raw_file = r'C:\Users\PC\git\Legal_QA_format\data\raw\ND-01-2020.docx'        # Replace with your raw file path
-    output_json = r'C:\Users\PC\git\Legal_QA_format\data\raw\ND-01-2020.json'      # Replace with your desired JSON output path
+    raw_file = r'C:\Users\PC\git\Legal_QA_format\data\raw\1. Luật Doanh nghiệp 2020.doc'        # Replace with your raw file path
+    output_json = r'C:\Users\PC\git\Legal_QA_format\data\raw\LDN.json'      # Replace with your desired JSON output path
     
     # Step 1: Convert raw file to structured JSON
     convert_raw_to_structured_json(raw_file, output_json)

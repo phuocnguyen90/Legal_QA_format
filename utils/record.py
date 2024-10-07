@@ -11,10 +11,10 @@ import logging
 from typing import Any, Dict, List, Optional, Union
 import re
 import pandas as pd
-from utils.llm_formatter import LLMFormatter
+
 import uuid
-from utils.load_config import load_config
-from utils.validation import detect_text_type
+from load_config import load_config
+from validation import detect_text_type
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -169,7 +169,7 @@ class Record:
             return None
 
     @classmethod
-    def from_unformatted_text(cls, text: str, llm_processor:LLMFormatter, record_type: str = "DOC") -> Optional['Record']:
+    def from_unformatted_text(cls, text: str, record_type: str = "DOC") -> Optional['Record']:
         """
         Initialize a Record object from unformatted text by using an LLM to structure it.
         
@@ -180,7 +180,9 @@ class Record:
         """
         try:
             # Use the LLM to format the unformatted text
-            formatted_text = llm_processor.format_text(text,"tagged",record_type)
+            from llm_formatter import LLMFormatter
+            llm_formatter=LLMFormatter
+            formatted_text = llm_formatter.format_text(text,"tagged",record_type)
             if not formatted_text:
                 logger.error("LLM failed to format the unformatted text.")
                 return None

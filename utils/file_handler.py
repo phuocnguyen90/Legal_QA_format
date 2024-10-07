@@ -13,8 +13,7 @@ import subprocess
 from docx import Document
 from docxcompose.composer import Composer
 from dotenv import load_dotenv
-from utils.validation import mask_api_key
-from utils.record import Record
+from record import Record
 
 # Configure logger
 logging.basicConfig(level=logging.INFO)

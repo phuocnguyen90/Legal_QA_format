@@ -1,246 +1,166 @@
-# utils/llm_formatter.py
-
 import logging
 import json
 import yaml
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Union
+from utils.record import Record  # Importing the Record class for usage
+
+# Placeholder for providers and loading configuration
 from providers import ProviderFactory  
-from providers.openai_provider import OpenAIProvider
-from providers.groq_provider import GroqProvider
 from providers.api_provider import APIProvider
-from utils.validation import detect_text_type, is_english
-from utils.record import Record
-# logging.getLogger(__name__)
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-class LLMFormatter:
+class LLMProcessor:
     """
-    Unified LLM Formatter supporting multiple formatting and enrichment modes and providers.
+    Consolidated LLM Processor to handle formatting, enrichment, input processing,
+    and generating Record instances.
     """
-    _instance = None
+    
+    def __init__(self, config_path: str, prompts_path: str = "config/schemas/prompts.yaml"):
+        # Load configuration and set up logging
+        self.config = self._load_config(config_path)
+        self.prompts = self._load_prompts(prompts_path)
+        self.provider = self._initialize_provider()
 
-    def __new__(cls, *args, **kwargs):
-        if not cls._instance:
-            cls._instance = super(LLMFormatter, cls).__new__(cls)
-        return cls._instance
+        logging.basicConfig(level=logging.INFO)
+        self.logger = logging.getLogger(__name__)
+        self.logger.info(f"LLMProcessor initialized with provider '{self.provider.__class__.__name__}'.")
 
-    def __init__(self, config: Dict[str, Any], prompts_path: str = "config/schemas/prompts.yaml"):
-        if not hasattr(self, 'initialized'):  # Avoid re-initializing
-            self.config = config
-            self.prompts = self._load_prompts(prompts_path)
-            self.provider_name = self.config.get('provider', 'openai').lower()
-            self.provider = self._initialize_provider()
-            self.initialized = True  # Mark as initialized
-            logger.info(f"LLMFormatter initialized with provider '{self.provider_name}'.")
+    def _load_config(self, config_path: str) -> Dict[str, Any]:
+        # Logic to load YAML configuration, similar to `load_config.py`
+        # Load and handle environment variables, etc.
+        pass
 
     def _load_prompts(self, prompts_path: str) -> Dict[str, Any]:
-        """
-        Load prompts from the specified YAML file.
-
-        :param prompts_path: Path to the YAML file containing prompts.
-        :return: Dictionary of prompts.
-        """
+        # Logic to load prompts from YAML
         try:
             with open(prompts_path, 'r', encoding='utf-8') as file:
                 prompts = yaml.safe_load(file)
-            logger.info(f"Loaded prompts from '{prompts_path}'.")
+            self.logger.info(f"Loaded prompts from '{prompts_path}'.")
             return prompts.get('prompts', {})
         except FileNotFoundError:
-            logger.error(f"Prompts file '{prompts_path}' not found.")
-            raise
-        except yaml.YAMLError as ye:
-            logger.error(f"YAML parsing error in '{prompts_path}': {ye}")
-            raise
-        except Exception as e:
-            logger.error(f"Unexpected error loading prompts '{prompts_path}': {e}")
+            self.logger.error(f"Prompts file '{prompts_path}' not found.")
             raise
 
     def _initialize_provider(self) -> APIProvider:
-        """
-        Initialize the API provider based on the configuration.
-
-        :return: An instance of the API provider.
-        """
-        provider_name = self.provider_name
-        if not provider_name:
-            logger.error("API provider not specified in the configuration.")
-            raise ValueError("API provider not specified in the configuration.")
-
+        # Initialize the appropriate LLM provider (OpenAI, etc.) based on the config
+        provider_name = self.config.get('provider', 'openai').lower()
         provider_config = self.config.get(provider_name, {})
-        if not provider_config:
-            logger.error(f"No configuration found for provider '{provider_name}'.")
-            raise ValueError(f"No configuration found for provider '{provider_name}'.")
+        return ProviderFactory.get_provider(provider_name, provider_config)
 
-        # Retrieve requirements if any (used by some providers)
-        requirements = self.config.get('processing', {}).get('pre_process_requirements', "")
-        try:
-            provider = ProviderFactory.get_provider(provider_name, provider_config, requirements)
-            logger.info(f"Initialized provider: {provider_name}")
-            return provider
-        except Exception as e:
-            logger.error(f"Failed to initialize provider '{provider_name}': {e}")
-            raise
+    # Consolidated Input Processing and Formatting
+
+    def process_input(self, raw_text: str, mode: str = "tagged", record_type: str = "DOC") -> Optional[Record]:
+        """
+        Process input text through LLM to create a Record instance.
+        :param raw_text: Unformatted text.
+        :param mode: The formatting mode - 'tagged', 'json', etc.
+        :param record_type: Type of record to be created.
+        :return: A Record instance or None.
+        """
+        formatted_text = self.format_text(raw_text, mode, record_type)
+        if formatted_text:
+            return Record.from_tagged_text(formatted_text, record_type)
+        return None
 
     def format_text(
         self, 
         raw_text: str, 
         mode: str = "tagged", 
-        record_type: Optional[str] = None, 
-        json_schema: Optional[Dict[str, Any]] = None
+        record_type: Optional[str] = None
     ) -> Optional[str]:
         """
-        Format raw text into structured formats using the specified mode and provider.
-
-        :param raw_text: The raw text input (could be tagged, json, or unformatted).
-        :param mode: The desired formatting mode ("tagged", "json", or "enrichment").
-        :param record_type: Type of the record ("QA" or "DOC") for enrichment mode.
-        :param json_schema: JSON schema for "json" mode.
-        :return: Formatted text as per the specified mode or None if formatting fails.
+        Format raw text using the specified mode.
         """
         try:
-            # Detect the input text type
-            text_type = detect_text_type(raw_text)
-            logger.debug(f"Detected text type: {text_type}")
-
-            # If input is unformatted, convert it to tagged using LLMFormatter
-            if text_type == "unformatted":
-                if mode != "tagged":
-                    logger.error("Unformatted input can only be converted to 'tagged' mode.")
-                    return None
-                logger.info("Converting unformatted text to tagged format using LLMFormatter.")
-                # Retrieve the tagged prompt template
-                prompt_template = self.prompts.get('formatting', {}).get('tagged', {}).get('prompt')
-                if not prompt_template:
-                    logger.error("Tagged prompt template not found in prompts.yaml.")
-                    return None
-                # Format the prompt with the raw_text
-                prompt = prompt_template.format(raw_text=raw_text)
-                # Send the prompt to the provider
-                formatted_output = self.provider.send_message(prompt=prompt)
-                if not formatted_output:
-                    logger.error("LLMFormatter failed to convert unformatted text to tagged format.")
-                    return None
-                raw_text = formatted_output  # Update raw_text to tagged format
-                text_type = "tagged"  # Update text_type after conversion
-                logger.debug("Successfully converted unformatted text to tagged format.")
-
-            # Handle based on desired mode
-            if mode == "tagged":
-                if text_type == "tagged":
-                    logger.info("Input is already in tagged format. Returning as-is.")
-                    return raw_text
-                elif text_type == "json":
-                    logger.info("Converting JSON to tagged format.")
-                    prompt_template = self.prompts.get('formatting', {}).get('tagged', {}).get('prompt')
-                    if not prompt_template:
-                        logger.error("Tagged prompt template not found in prompts.yaml.")
-                        return None
-                    prompt = prompt_template.format(raw_text=raw_text)
-                    formatted_output = self.provider.send_message(prompt=prompt)
-                    if not formatted_output:
-                        logger.error("LLMFormatter failed to convert JSON to tagged format.")
-                        return None
-                    return formatted_output
-
-            elif mode == "json":
-                if text_type == "json":
-                    logger.info("Input is already in JSON format. Returning as-is.")
-                    return raw_text
-                elif text_type == "tagged":
-                    logger.info("Converting tagged format to JSON.")
-                    prompt_template = self.prompts.get('formatting', {}).get('json', {}).get('prompt')
-                    if not prompt_template:
-                        logger.error("JSON prompt template not found in prompts.yaml.")
-                        return None
-                    if not json_schema:
-                        logger.error("json_schema must be provided for json formatting mode.")
-                        return None
-                    json_schema_str = json.dumps(json_schema, indent=2)
-                    prompt = prompt_template.format(raw_text=raw_text, json_schema=json_schema_str)
-                    formatted_output = self.provider.send_message(prompt=prompt)
-                    if not formatted_output:
-                        logger.error("LLMFormatter failed to convert tagged format to JSON.")
-                        return None
-                    return formatted_output
-
-            elif mode == "enrichment":
-                logger.info("Performing enrichment on the input text.")
-                prompt_template = self.prompts.get('enrichment', {}).get('enrichment_prompt')
-                if not prompt_template:
-                    logger.error("Enrichment prompt template not found in prompts.yaml.")
-                    return None
-                if not record_type:
-                    logger.error("record_type must be specified for enrichment mode.")
-                    return None
-                prompt = prompt_template.format(chunk_text=raw_text)
-                formatted_output = self.provider.send_message(prompt=prompt)
-                if not formatted_output:
-                    logger.error("LLMFormatter failed to perform enrichment.")
-                    return None
-                return formatted_output
-
-            else:
-                logger.error(f"Unsupported formatting mode: {mode}")
+            prompt_template = self.prompts.get('formatting', {}).get(mode, {}).get('prompt')
+            if not prompt_template:
+                self.logger.error(f"Prompt for mode '{mode}' not found in prompts.")
                 return None
 
+            # Replace the placeholders in the prompt
+            prompt = prompt_template.format(raw_text=raw_text)
+            formatted_output = self.provider.send_message(prompt=prompt)
+            if not formatted_output:
+                self.logger.error(f"Failed to format text in mode '{mode}'.")
+                return None
+
+            return formatted_output
         except Exception as e:
-            logger.error(f"Error in format_text method: {e}")
+            self.logger.error(f"Error during formatting: {e}")
             return None
 
-    
-    def _initialize_provider_override(self, provider: str) -> APIProvider:
+    def enrich_text(self, chunk_text: str) -> Optional[Dict[str, Any]]:
         """
-        Initialize a different provider on the fly.
-
-        :param provider: The LLM provider to use ("openai", "groq", etc.).
-        :return: An instance of the specified API provider.
-        """
-        provider = provider.lower()
-        provider_config = self.config.get(provider, {})
-        if not provider_config:
-            logger.error(f"No configuration found for provider '{provider}'.")
-            raise ValueError(f"No configuration found for provider '{provider}'.")
-
-        # Retrieve requirements if any (used by some providers)
-        requirements = self.config.get('processing', {}).get('pre_process_requirements', "")
-        try:
-            provider_instance = ProviderFactory.get_provider(provider, provider_config, requirements)
-            logger.info(f"Initialized provider: {provider}")
-            return provider_instance
-        except Exception as e:
-            logger.error(f"Failed to initialize provider '{provider}': {e}")
-            raise
-
-    def translate(self, record:Record) -> None:
-        """ 
-        Translate the title and content of the record to Vietnamese if they are in English.
-        Uses the LLM to perform the translation and updates the record object directly.
+        Enrich a chunk of text, extracting main topics, categories, etc.
+        :param chunk_text: The raw chunk of text.
+        :return: Enriched data dictionary.
         """
         try:
-            # Translate title if it is in English
-            if is_english(record.title):
-                logger.info(f"Translating title for record ID {record.record_id} to Vietnamese.")
-                title_prompt = f"Translate the following English text to Vietnamese: '{record.title}'"
-                translated_title = self.provider.send_message(title_prompt)
-                if translated_title:
-                    record.title = translated_title.strip()  # Update title with translated text
-                else:
-                    logger.warning(f"Translation for title of record ID {record.record_id} failed or returned empty.")
+            formatted_output = self.format_text(raw_text=chunk_text, mode="enrichment")
+            if not formatted_output:
+                self.logger.error("Enrichment failed or returned empty output.")
+                return None
 
-            # Translate content if it is in English
-            if is_english(record.content):
-                logger.info(f"Translating content for record ID {record.record_id} to Vietnamese.")
-                content_prompt = f"Translate the following English text to Vietnamese: '{record.content}'"
-                translated_content = self.provider.send_message(content_prompt)
-                if translated_content:
-                    record.content = translated_content.strip()  # Update content with translated text
-                else:
-                    logger.warning(f"Translation for content of record ID {record.record_id} failed or returned empty.")
-
-            logger.info(f"Translation completed for record ID {record.record_id}.")
+            enriched_data = self._parse_llm_response(formatted_output)
+            return enriched_data
         except Exception as e:
-            logger.error(f"Error during translation for record ID {record.record_id}: {e}")
+            self.logger.error(f"Error enriching text: {e}")
+            return None
+
+    def _parse_llm_response(self, response: str) -> Dict[str, Any]:
+        """
+        Parse the LLM response into structured enrichment data.
+        """
+        enriched_data = {}
+        lines = response.split('\n')
+        for line in lines:
+            if line.startswith('Main Topic:'):
+                enriched_data['Main Topic'] = line.replace('Main Topic:', '').strip()
+            elif line.startswith('Applicability:'):
+                enriched_data['Applicability'] = line.replace('Applicability:', '').strip()
+            elif line.startswith('Generated Title:'):
+                enriched_data['Generated Title'] = line.replace('Generated Title:', '').strip()
+            elif line.startswith('Suggested Categories:'):
+                categories = line.replace('Suggested Categories:', '').strip()
+                enriched_data['Assigned Categories'] = [cat.strip() for cat in categories.split(',')]
+        return enriched_data
+
+    def chunk_text(self, content: str) -> List[str]:
+        """
+        Split a large text into manageable chunks.
+        :param content: The full document text.
+        :return: List of text chunks.
+        """
+        pattern = r'Article\s+\d+[\.,]?\s+'  # Adjust the regex pattern based on content
+        chunks = re.split(pattern, content)
+        return [chunk.strip() for chunk in chunks if chunk.strip()]
+
+    def process_document(self, document_path: str) -> List[Record]:
+        """
+        Read the document, split it into chunks, enrich each chunk, and create Record objects.
+        """
+        content = self.read_document_content(document_path)
+        chunks = self.chunk_text(content)
+
+        records = []
+        for idx, chunk in enumerate(chunks, start=1):
+            enriched_data = self.enrich_text(chunk)
+            if enriched_data:
+                record = Record(
+                    record_id=f"doc-{idx}",
+                    document_id=None,
+                    title=enriched_data.get('Generated Title', ''),
+                    content=chunk,
+                    chunk_id=f"chunk-{idx}",
+                    categories=enriched_data.get('Assigned Categories', [])
+                )
+                records.append(record)
+        return records
+
+    def read_document_content(self, file_path: str) -> str:
+        """
+        Read content from document files (txt, pdf, docx).
+        """
+        # Handle different file formats - txt, docx, pdf, etc.
+        # This is where you can consolidate the file-reading logic
+        pass
 
