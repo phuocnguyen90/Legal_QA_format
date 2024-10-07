@@ -9,7 +9,7 @@ from providers.openai_provider import OpenAIProvider
 from providers.groq_provider import GroqProvider
 from providers.api_provider import APIProvider
 from utils.validation import detect_text_type, is_english
-from utils.record import Record
+# from utils.record import Record
 # logging.getLogger(__name__)
 
 # Configure logging
@@ -214,7 +214,7 @@ class LLMFormatter:
             logger.error(f"Failed to initialize provider '{provider}': {e}")
             raise
 
-    def translate(self, record:Record) -> None:
+    def translate(self, record) -> None:
         """ 
         Translate the title and content of the record to Vietnamese if they are in English.
         Uses the LLM to perform the translation and updates the record object directly.

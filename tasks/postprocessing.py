@@ -5,6 +5,7 @@ from tqdm import tqdm
 import json
 import os
 import sys
+from typing import Optional, Dict, Any, Tuple
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.file_handler import read_input_file, output_2_jsonl, load_record
