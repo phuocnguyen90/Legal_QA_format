@@ -1,4 +1,5 @@
 import logging
+import os
 from sklearn.feature_extraction.text import TfidfVectorizer
 from collections import defaultdict
 import re
