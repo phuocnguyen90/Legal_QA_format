@@ -3,15 +3,20 @@ import logging
 import fastembed
 import numpy as np
 import uuid
+import json
+
+import re
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qdrant_models
-from typing import Dict, Any
-from groq import Groq  # Ensure Groq SDK is installed
+from typing import Dict, Any, List
 
+
+from providers.groq_provider import GroqProvider
 from utils.load_config import load_config
+from utils.record import Record
 
 # Configure logger
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # Load configuration from config.yaml
@@ -33,7 +38,7 @@ if not QDRANT_API_KEY or not QDRANT_URL:
     exit(1)
 
 # Qdrant Collection Configuration
-COLLECTION_NAME = "presidential_speeches"
+COLLECTION_NAME = "legal_qa"
 DIMENSION = 384  # Updated to match the FastEmbed model's output dimension
 
 # Set up Qdrant Client with Qdrant Cloud parameters
@@ -59,13 +64,19 @@ except Exception as e:
     logger.error(f"Failed to create or verify Qdrant collection: {e}")
     exit(1)
 
-# Initialize the Groq Client for LLM API calls
+# Initialize the GroqProvider
 try:
-    groq_client = Groq(api_key=GROQ_API_KEY)
-    model = config.get('groq_model_name', 'llama3-8b-8192')
-    logger.info("Groq client initialized successfully.")
+    groq_config = {
+        'api_key': GROQ_API_KEY,
+        'model_name': config.get('groq_model_name', 'llama-3.1-8b-instant'),
+        'embedding_model_name': config.get('embedding_model_name', 'groq-embedding-001'),
+        'temperature': config.get('temperature', 0.7),
+        'max_output_tokens': config.get('max_output_tokens', 4096)
+    }
+    groq_provider = GroqProvider(config=groq_config, requirements=config.get('requirements', ''))
+    logger.info("GroqProvider initialized successfully.")
 except Exception as e:
-    logger.error(f"Failed to initialize Groq client: {e}")
+    logger.error(f"Failed to initialize GroqProvider: {e}")
     exit(1)
 
 # Step 1: Embedding Function using FastEmbed
@@ -108,55 +119,144 @@ def fe_embed_text(text: str) -> list:
         logger.error(f"Failed to create embedding for the input: '{text}', error: {e}")
         return []
 
-# Step 2: Function to Add a Single Document to Qdrant
-def add_document_to_qdrant(document: Dict[str, Any]):
+# Step 2: Read JSONL File and Create Records
+def read_and_add_documents(jsonl_file_path: str):
     """
-    Add a single document to the Qdrant collection.
+    Read records from a JSONL file and batch add them to Qdrant.
 
-    :param document: A dictionary containing 'content' and 'metadata'.
+    :param jsonl_file_path: Path to the JSONL file containing records.
     """
-    content = document['content']
-    metadata = document.get('metadata', {})
-
-    embedding = fe_embed_text(content)
-    if not embedding:
-        logger.error("Skipping document due to embedding failure.")
-        return
-
-    # Generate a unique UUID for each document
-    point_id = str(uuid.uuid4())
-
-    # Include 'content' in the payload alongside 'metadata'
-    payload = {
-        "content": content,
-        **metadata  # Unpack metadata into the payload
-    }
-
-    point = qdrant_models.PointStruct(
-        id=point_id,
-        vector=embedding,
-        payload=payload
-    )
-
-    # Insert data into Qdrant
+    records_batch = []
     try:
+        with open(jsonl_file_path, 'r', encoding='utf-8') as jsonl_file:
+            for line in jsonl_file:
+                try:
+                    data = json.loads(line)
+                    # Create a Record instance from JSON
+                    record = Record.from_json(data)
+                    if record:
+                        records_batch.append(record)
+                    else:
+                        logger.error("Failed to create Record from JSON data.")
+                except json.JSONDecodeError as e:
+                    logger.error(f"Error reading line from JSONL file: {e}")
+
+                # Define a batch size (e.g., 100 records) to upsert in chunks
+                if len(records_batch) >= 100:
+                    add_records_to_qdrant(records_batch)
+                    records_batch = []
+
+        # Add any remaining records that didn't reach the batch size
+        if records_batch:
+            add_records_to_qdrant(records_batch)
+    except FileNotFoundError:
+        logger.error(f"File '{jsonl_file_path}' not found.")
+    except Exception as e:
+        logger.error(f"Error processing JSONL file: {e}")
+
+
+def add_record_to_qdrant(record: Record):
+    """
+    Add a single Record to Qdrant.
+
+    :param record: Record object to be added.
+    """
+    try:
+        embedding = fe_embed_text(record.content)
+        if not embedding:
+            logger.error(f"Skipping record {record.record_id} due to embedding failure.")
+            return
+
+        # Use record_id directly as the point ID
+        record_id_str = record.record_id
+
         qdrant_client.upsert(
             collection_name=COLLECTION_NAME,
-            points=[point]
+            points=[
+                qdrant_models.PointStruct(
+                    id=record_id_str,
+                    vector=embedding,
+                    payload={
+                        "record_id": record.record_id,
+                        "document_id": record.document_id,
+                        "content": record.content,
+                        "title": record.title,
+                        "chunk_id": record.chunk_id,
+                        "hierarchy_level": record.hierarchy_level,
+                        "categories": record.categories,
+                        "relationships": record.relationships,
+                        "published_date": record.published_date,
+                        "source": record.source,
+                        "processing_timestamp": record.processing_timestamp,
+                        "validation_status": record.validation_status,
+                        "language": record.language,
+                        "summary": record.summary
+                    }
+                )
+            ]
         )
-        logger.info(f"Successfully added document with ID {point_id} to Qdrant collection '{COLLECTION_NAME}'.")
+        logger.info(f"Successfully added record {record.record_id} to Qdrant collection '{COLLECTION_NAME}'.")
     except Exception as e:
-        logger.error(f"Failed to add document to Qdrant: {e}")
+        logger.error(f"Failed to add record {record.record_id} to Qdrant: {e}")
+
+# Step 3: Batch Add Records to Qdrant
+def add_records_to_qdrant(records: List[Record]):
+    """
+    Batch add records to Qdrant.
+
+    :param records: List of Record objects to be added.
+    """
+    points = []
+    for record in records:
+        embedding = fe_embed_text(record.content)
+        if not embedding:
+            logger.error(f"Skipping record {record.record_id} due to embedding failure.")
+            continue
+
+        # Generate a separate UUID for Qdrant point ID
+        qdrant_uuid = str(uuid.uuid4())
+
+        point = qdrant_models.PointStruct(
+            id=qdrant_uuid,  # Use generated UUID as the point ID
+            vector=embedding,
+            payload={
+                "record_id": record.record_id,          # Store original record_id
+                "document_id": record.document_id,
+                "content": record.content,
+                "title": record.title,
+                "chunk_id": record.chunk_id,
+                "hierarchy_level": record.hierarchy_level,
+                "categories": record.categories,
+                "relationships": record.relationships,
+                "published_date": record.published_date,
+                "source": record.source,
+                "processing_timestamp": record.processing_timestamp,
+                "validation_status": record.validation_status,
+                "language": record.language,
+                "summary": record.summary
+            }
+        )
+        points.append(point)
+
+    if points:
+        try:
+            qdrant_client.upsert(
+                collection_name=COLLECTION_NAME,
+                points=points
+            )
+            logger.info(f"Successfully added {len(points)} records to Qdrant collection '{COLLECTION_NAME}'.")
+        except Exception as e:
+            logger.error(f"Failed to add records to Qdrant: {e}")
 
 
-# Step 3: Function to Perform Vector Search in Qdrant
+# Step 4: Function to Perform Vector Search in Qdrant
 def search_qdrant(query: str, top_k: int = 3) -> list:
     """
     Search Qdrant using an embedding of the query.
 
     :param query: The input query to search similar documents.
     :param top_k: Number of similar results to return.
-    :return: List of similar documents with 'content' and 'source'.
+    :return: List of similar documents with 'record_id', 'content', 'source', and 'score'.
     """
     query_embedding = fe_embed_text(query)
 
@@ -170,9 +270,10 @@ def search_qdrant(query: str, top_k: int = 3) -> list:
             query_vector=query_embedding,
             limit=top_k
         )
-        # Extract 'content' and 'source' from the payload
+        # Extract 'record_id', 'content', and 'source' from the payload
         return [
             {
+                "record_id": hit.payload.get("record_id", ""),
                 "content": hit.payload.get("content", ""),
                 "source": hit.payload.get("source", ""),
                 "score": hit.score
@@ -184,65 +285,78 @@ def search_qdrant(query: str, top_k: int = 3) -> list:
         return []
 
 
-
-def rag(query: str) -> str:
+# Step 5: Validation Function for Citations
+def validate_citation(response: str) -> bool:
     """
-    Use Qdrant for retrieval and Groq LLM for augmented generation.
+    Validate that the response contains at least one Document ID citation.
+
+    :param response: The response generated by the LLM.
+    :return: True if at least one citation is found, False otherwise.
+    """
+    pattern = r'\[Mã tài liệu:\s*[\w-]+\]'
+    return bool(re.search(pattern, response))
+
+
+# Step 6: Retrieval-Augmented Generation (RAG) Function
+def rag(query: str, groq_provider: GroqProvider) -> str:
+    """
+    Use Qdrant for retrieval and GroqProvider for augmented generation.
 
     :param query: The query to generate a response for.
+    :param groq_provider: An instance of GroqProvider to interact with the LLM.
     :return: Augmented response from LLM.
     """
-    # Step 4.1: Retrieve similar documents using Qdrant
+    # Step 1: Retrieve similar documents using Qdrant
     retrieved_docs = search_qdrant(query)
     if not retrieved_docs:
-        return "No relevant information found."
+        return "Không tìm thấy thông tin liên quan."
 
-    # Step 4.2: Combine retrieved documents to form context for LLM
-    context = "\n\n------------------------------------------------------\n\n".join(
-        [f"Source: {doc['source']}\nContent: {doc['content']}" for doc in retrieved_docs if doc['content']]
-    )
+    # Step 2: Combine retrieved documents to form context for LLM
+    context = "\n\n------------------------------------------------------\n\n".join([
+        f"Mã tài liệu: {doc['record_id']}\nNguồn: {doc['source']}\nNội dung: {doc['content']}"
+        for doc in retrieved_docs if doc['content']
+    ])
 
-    # Step 4.3: Query the Groq LLM with retrieved context and original query
+    # Step 3: Define the system prompt with clear citation instructions
     system_prompt = '''
-    You are a presidential historian. Given the user's question and relevant excerpts from 
-    presidential speeches, answer the question by including direct quotes from presidential speeches. 
-    When using a quote, cite the speech that it was from.
+    Bạn là một trợ lý pháp lý chuyên nghiệp. Dựa trên câu hỏi của người dùng và các kết quả tìm kiếm liên quan từ cơ sở dữ liệu câu hỏi thường gặp của bạn, hãy trả lời câu hỏi và trích dẫn cơ sở pháp lý nếu có trong thông tin được cung cấp.
+    Không thêm ý kiến cá nhân; hãy trả lời chi tiết nhất có thể chỉ sử dụng các kết quả tìm kiếm được cung cấp để trả lời.
+    Khi trích dẫn nguồn, hãy tham chiếu đến Mã tài liệu (Record ID) được cung cấp trong ngữ cảnh theo định dạng: [Mã tài liệu: <record_id>].
+    Ví dụ: "Theo quy định trong [Mã tài liệu: QA_750F0D91], ...".
+    Luôn trả lời bằng tiếng Việt.
     '''
 
+    # Combine system prompt and user message
+    full_prompt = f"{system_prompt}\n\nCâu hỏi của người dùng: {query}\n\nCác câu trả lời liên quan:\n\n{context}"
+
     try:
-        chat_completion = groq_client.chat.completions.create(
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_prompt
-                },
-                {
-                    "role": "user",
-                    "content": f"User Question: {query}\n\nRelevant Speech Excerpt(s):\n\n{context}",
-                }
-            ],
-            model=model
-        )
-        return chat_completion.choices[0].message.content.strip()
+        # Step 4: Send the prompt to GroqProvider
+        answer = groq_provider.send_message(prompt=full_prompt)
+
+        if not answer:
+            logger.error("Received empty response from GroqProvider.")
+            return "Đã xảy ra lỗi khi tạo câu trả lời."
+
+        # Step 5: Validate that the answer contains at least one citation
+        if not validate_citation(answer):
+            logger.warning("Câu trả lời không chứa bất kỳ trích dẫn nào từ Mã tài liệu.")
+            # Optionally, handle the missing citation, e.g., prompt the LLM again or notify the user
+            # For simplicity, we'll return the answer as is
+        else:
+            logger.info("Câu trả lời chứa các trích dẫn từ Mã tài liệu.")
+
+        return answer
     except Exception as e:
-        logger.error(f"Error generating response from Groq LLM: {e}")
-        return "An error occurred while generating the response."
+        logger.error(f"Lỗi khi tạo câu trả lời từ RAG: {e}")
+        return "Đã xảy ra lỗi khi tạo câu trả lời."
 
-
-# Step 5: Example Usage
+# Example Usage
 if __name__ == "__main__":
-    # Example documents to add to Qdrant
-    documents = [
-        {"content": "George Washington emphasized the importance of democracy in his farewell address.", "metadata": {"source": "Washington Farewell Speech"}},
-        {"content": "Abraham Lincoln spoke about national unity in his Gettysburg Address.", "metadata": {"source": "Lincoln Gettysburg Address"}},
-        {"content": "Thomas Jefferson's inaugural address mentioned the importance of equality.", "metadata": {"source": "Jefferson Inaugural Address"}},
-    ]
+    # Uncomment the following lines to add documents from a JSONL file
+    # jsonl_file_path = r'src\data\preprocessed\preprocessed_data.jsonl'  # Replace with actual path to JSONL file
+    # read_and_add_documents(jsonl_file_path)
 
-    # Add documents to Qdrant one by one
-    for document in documents:
-        add_document_to_qdrant(document)
-
-    # Test the RAG function
-    user_query = "What did Abraham Lincoln say about national unity?"
-    answer = rag(user_query)
+    # Optionally, test RAG function after records are added
+    user_query = "Huy động vốn của công ty cổ phần: Các phương thức và quy định pháp lý?"
+    answer = rag(user_query, groq_provider)
     print(f"Answer: {answer}")

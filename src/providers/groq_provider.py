@@ -1,4 +1,4 @@
-# providers/groq_provider.py
+# src/providers/groq_provider.py
 
 import logging
 from typing import Optional, List, Dict, Any
@@ -28,7 +28,7 @@ class GroqProvider(APIProvider):
                 logger.error("Groq API key is missing.")
                 raise ValueError("Groq API key is missing.")
             self.client = Groq(api_key=api_key)
-            self.model_name = config.get('model_name', "llama3-70b-8192")
+            self.model_name = config.get('model_name', "llama-3.1-8b-instant")
             self.embedding_model_name = config.get('embedding_model_name', "groq-embedding-001")
             self.temperature = config.get('temperature', 0.7)
             self.max_output_tokens = config.get('max_output_tokens', 4096)
