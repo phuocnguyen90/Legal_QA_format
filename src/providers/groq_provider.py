@@ -29,6 +29,7 @@ class GroqProvider(APIProvider):
                 raise ValueError("Groq API key is missing.")
             self.client = Groq(api_key=api_key)
             self.model_name = config.get('model_name', "llama3-70b-8192")
+            self.embedding_model_name = config.get('embedding_model_name', "groq-embedding-001")
             self.temperature = config.get('temperature', 0.7)
             self.max_output_tokens = config.get('max_output_tokens', 4096)
             logger.info("GroqProvider initialized successfully.")
@@ -70,4 +71,32 @@ class GroqProvider(APIProvider):
 
         except Exception as e:
             logger.error(f"Error during Groq API call: {e}")
+            return None
+        
+    def create_embedding(self, text: str) -> Optional[List[float]]:
+        """
+        Create an embedding for the given text using the Groq embedding model.
+
+        :param text: The input text to create an embedding for.
+        :return: A list representing the embedding vector or None if the call fails.
+        """
+        try:
+            logger.debug("Sending request to Groq API for embedding.")
+            response = self.client.embeddings.create(
+                model=self.embedding_model_name,
+                input=text
+            )
+            logger.debug("Received response from Groq API for embedding.")
+
+            if not response or 'data' not in response or len(response['data']) == 0:
+                logger.error("Invalid or empty response structure from Groq embedding API.")
+                return None
+
+            embedding = response['data'][0]['embedding']
+            logger.debug(f"Embedding received: {embedding}")
+
+            return embedding
+
+        except Exception as e:
+            logger.error(f"Error during Groq API embedding call: {e}")
             return None

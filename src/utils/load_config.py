@@ -1,3 +1,4 @@
+# src/utils/load_config.py
 import yaml
 import logging
 import re
@@ -6,7 +7,7 @@ from dotenv import load_dotenv
 import os
 # logging.getLogger(__name__)
 
-def load_config(config_path='config/config.yaml', dotenv_path='config/.env'):
+def load_config(config_path='src/config/config.yaml', dotenv_path='src/config/.env'):
     """
     Load the YAML configuration file and resolve environment variables.
 

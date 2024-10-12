@@ -15,7 +15,7 @@ def main():
 
     # Load configuration
     try:
-        config = load_config('config/config.yaml')
+        config = load_config('src/config/config.yaml')
     except Exception as e:
         print(f"Failed to load configuration: {e}")
         return
