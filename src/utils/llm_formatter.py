@@ -27,7 +27,7 @@ class LLMFormatter:
             cls._instance = super(LLMFormatter, cls).__new__(cls)
         return cls._instance
 
-    def __init__(self, config: Dict[str, Any], prompts_path: str = "config/schemas/prompts.yaml"):
+    def __init__(self, config: Dict[str, Any], prompts_path: str = "src/config/schemas/prompts.yaml"):
         if not hasattr(self, 'initialized'):  # Avoid re-initializing
             self.config = config
             self.prompts = self._load_prompts(prompts_path)

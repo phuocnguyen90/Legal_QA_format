@@ -6,6 +6,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from collections import defaultdict
 from difflib import SequenceMatcher, get_close_matches
+import underthesea
 from underthesea import word_tokenize  # Replace with appropriate tokenizer if needed
 import pickle
 from typing import List, Tuple, Dict
@@ -23,10 +24,18 @@ def compute_tfidf_similarity(query, documents):
     sims = cosine_similarity(query_vec, doc_vecs).flatten()
     return sims
 
-class DocRetriever:
+def compute_similarity(query_text, document_text):
+    # Use your preferred similarity measure, e.g., cosine similarity with TF-IDF
+    vectorizer = TfidfVectorizer().fit([query_text, document_text])
+    vectors = vectorizer.transform([query_text, document_text])
+    similarity = cosine_similarity(vectors[0], vectors[1])[0][0]
+    return similarity
+
+
+class CombinedDocumentSearch:
     def __init__(self, csv_path: str, token_db_path: str = 'src/data/token_db.pkl'):
         """
-        Initialize the DocRetriever with paths to the CSV and token database.
+        Initialize the CombinedDocumentSearch with paths to the CSV and token database.
 
         :param csv_path: Path to the CSV file containing documents.
         :param token_db_path: Path to the token database pickle file.
@@ -176,30 +185,34 @@ class DocRetriever:
 
     def extract_document_mentions(self, text: str) -> List[Dict[str, str]]:
         mentions = []
-        split_pattern = re.compile(r'\s+và\s+', re.IGNORECASE)
-        segments = split_pattern.split(text)
-        logger.debug(f"Segments after splitting on 'và': {segments}")
+        # Use sentence tokenizer
+        sentences = underthesea.sent_tokenize(text)
+        logger.debug(f"Sentences after tokenization: {sentences}")
+
 
         pattern = re.compile(
             r"(?P<document_type>Luật|Bộ luật|Pháp lệnh|Nghị định|Thông tư(?: liên tịch)?|Nghị quyết|Quyết định)"
-            r"(?:\s+(?P<document_number>\d{1,3}))?"
-            r"(?:/(?P<issue_year>\d{4}))?"
-            r"(?:/(?P<suffix>[\w\-]+))?"
-            r"(?:\s+(?P<extra_info>.+))?",
+            r"(?:\s+(?P<document_number>\d{1,4}))?"
+            r"(?:\s+(?P<document_subtype>Luật|Bộ luật|Pháp lệnh))?"
+            r"(?:\s+(?P<extra_info>.+?))?"
+            r"(?:\s+(?P<issue_year>\d{4}))?",
             re.UNICODE | re.IGNORECASE
         )
 
-        for segment in segments:
-            segment = segment.strip()
-            if not segment:
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
                 continue
-            match = pattern.match(segment)
-            if match:
+            # Search for all matches in the sentence
+            for match in pattern.finditer(sentence):
                 document_type = match.group("document_type").strip().lower() if match.group("document_type") else ""
                 document_number = match.group("document_number").strip() if match.group("document_number") else ""
+                document_subtype = match.group("document_subtype").strip().lower() if match.group("document_subtype") else ""
                 issue_year = match.group("issue_year").strip() if match.group("issue_year") else ""
-                suffix = match.group("suffix").strip() if match.group("suffix") else ""
                 extra_info = match.group("extra_info").strip() if match.group("extra_info") else ""
+
+                # Build mention text
+                mention_text = match.group(0).strip()
 
                 # Determine the issuer body if present in extra info
                 issuer_body = ""
@@ -209,15 +222,9 @@ class DocRetriever:
                         # Remove the identified issuer body from extra_info
                         extra_info = extra_info.replace(body, "").strip()
 
-                mention_text = document_type.capitalize()
-                if document_number:
-                    mention_text += f" {document_number}"
-                if issue_year:
-                    mention_text += f"/{issue_year}"
-                if suffix:
-                    mention_text += f"/{suffix}"
-                if extra_info:
-                    mention_text += f" {extra_info}"
+                # Adjust document type if document_subtype is present
+                if document_subtype:
+                    document_type += f" {document_subtype}"
 
                 mentions.append({
                     'mention': mention_text,
@@ -228,8 +235,6 @@ class DocRetriever:
                     'extra_info': extra_info
                 })
                 logger.debug(f"Extracted mention: {mentions[-1]}")
-            else:
-                logger.debug(f"No match found for segment: '{segment}'")
 
         logger.info(f"Extracted mentions with detailed info: {mentions}")
         return mentions
@@ -245,93 +250,97 @@ class DocRetriever:
         extra_info: str,
         top_n: int = 2,
         fuzzy: bool = False,
-        cutoff: float = 0.75  # Adjust as needed
+        cutoff: float = 0.5  # Adjust as needed
     ) -> Dict[str, List[Tuple[str, str, float]]]:
         matches = defaultdict(list)
 
-        # Adjusted weights
-        weights = {
-            'document_type': 0.2,
-            'document_number': 0.3,  # Increased weight
-            'issue_year': 0.3,
-            'issuer_body': 0.2
+        # Assign base confidence scores
+        base_confidences = {
+            'document_type': 1.0 if document_type else 0.0,
+            'document_number': 1.0 if document_number else 0.0,
+            'issue_year': 1.0 if issue_year else 0.0,
+            'issuer_body': 1.0 if issuer_body else 0.0,
+            'extra_info': 1.0 if extra_info else 0.0
         }
-        total_weight = 0
+
+        # Assign reliability factors
+        reliability_factors = {
+            'document_type': 0.8,
+            'document_number': 0.9,
+            'issue_year': 0.7,
+            'issuer_body': 0.8,
+            'extra_info': 0.6
+        }
+
+        # Calculate confidence scores
+        confidence_scores = {}
+        total_confidence = 0.0
+        for prop in base_confidences:
+            confidence = base_confidences[prop] * reliability_factors[prop]
+            confidence_scores[prop] = confidence
+            total_confidence += confidence
+
+        # Normalize weights
+        dynamic_weights = {}
+        for prop in confidence_scores:
+            if total_confidence > 0:
+                dynamic_weights[prop] = confidence_scores[prop] / total_confidence
+            else:
+                dynamic_weights[prop] = 0.0
+
+        # Build initial conditions based on available properties
         combined_condition = pd.Series(True, index=self.documents.index)
+        for prop in ['document_type', 'document_number', 'issue_year', 'issuer_body']:
+            value = locals()[prop]
+            if value:
+                if prop == 'document_type':
+                    # Handle equivalent document types
+                    equivalent_types = self.equivalent_document_types.get(value.lower(), [value.lower()])
+                    condition = self.documents['document_type'].str.lower().isin(equivalent_types)
+                else:
+                    condition = self.documents[prop].str.lower() == value.lower()
+                combined_condition &= condition
 
-        # Handle equivalent document types
-        if document_type:
-            equivalent_types = self.equivalent_document_types.get(document_type.lower(), [document_type.lower()])
-            condition = self.documents['document_type'].str.lower().isin(equivalent_types)
-            combined_condition &= condition
-            total_weight += weights['document_type']
-        if document_number:
-            condition = self.documents['document_number'].str.lower() == document_number.lower()
-            combined_condition &= condition
-            total_weight += weights['document_number']
-        if issue_year:
-            condition = self.documents['issue_year'] == issue_year
-            combined_condition &= condition
-            total_weight += weights['issue_year']
-        if issuer_body:
-            condition = self.documents['issuer_body'].str.lower() == issuer_body.lower()
-            combined_condition &= condition
-            total_weight += weights['issuer_body']
-
-        # Apply conditions
+        # Apply conditions to get potential matches
         potential_matches = self.documents[combined_condition]
-        logger.debug(f"Potential matches based on provided information: {len(potential_matches)}")
+        logger.debug(f"Potential matches based on provided properties: {len(potential_matches)}")
 
-        # Compute confidence score based on matched properties
-        confidence_score = total_weight  # Since we only included properties that matched
+        # Calculate match scores for potential matches
+        for idx, doc in potential_matches.iterrows():
+            match_score = 0.0
 
-        # Confidence threshold (e.g., 0.7)
-        confidence_threshold = 0.7
-        if not potential_matches.empty and confidence_score >= confidence_threshold:
-            # Collect matches with confidence score
-            for _, row in potential_matches.iterrows():
-                matches[mention].append((row['Full Name'], row['Document_ID'], confidence_score))
-            # Sort matches by issue year in descending order
-            matches[mention] = sorted(matches[mention], key=lambda x: int(self.documents.loc[self.documents['Document_ID'] == x[1], 'issue_year'].values[0]), reverse=True)
-            matches[mention] = matches[mention][:top_n]
-            logger.info(f"Found matches for mention '{mention}' with high confidence.")
-        else:
-            # Proceed to similarity search
-            # Narrow down potential matches based on available properties
-            potential_matches = self.documents
-            equivalent_types = self.equivalent_document_types.get(document_type.lower(), [document_type.lower()])
-            potential_matches = potential_matches[potential_matches['document_type'].str.lower().isin(equivalent_types)]
-            if document_number:
-                potential_matches = potential_matches[potential_matches['document_number'].str.lower() == document_number.lower()]
-            if issuer_body:
-                potential_matches = potential_matches[potential_matches['issuer_body'].str.lower() == issuer_body.lower()]
-            potential_matches = potential_matches.copy()
-            documents = potential_matches['Full Name'].tolist()
+            # Check property matches
+            for prop in ['document_type', 'document_number', 'issue_year', 'issuer_body']:
+                value = locals()[prop]
+                if value:
+                    if prop == 'document_type':
+                        match = doc['document_type'].lower() in self.equivalent_document_types.get(value.lower(), [value.lower()])
+                    else:
+                        match = doc[prop].lower() == value.lower()
+                    if match:
+                        match_score += dynamic_weights[prop]
+                    else:
+                        # Penalize mismatches
+                        match_score -= dynamic_weights[prop]
 
-            # Prepare query text for similarity computation
+            # Compute similarity for extra_info
             if extra_info:
-                query_text = f"{document_type} {document_number} {extra_info}".strip().lower()
-            else:
-                query_text = mention.lower()
+                similarity = compute_similarity(extra_info.lower(), doc['Full Name'].lower())
+                match_score += dynamic_weights['extra_info'] * similarity
 
-            # Compute similarity scores using TF-IDF
-            similarities = compute_tfidf_similarity(query_text, documents)
-            potential_matches['similarity'] = similarities
+            # Add match to results if score exceeds cutoff
+            if match_score >= cutoff:
+                matches[mention].append((doc['Full Name'], doc['Document_ID'], match_score))
 
-            # Filter matches based on similarity cutoff
-            potential_matches = potential_matches[potential_matches['similarity'] >= cutoff]
+        # Sort matches by score
+        matches[mention] = sorted(matches[mention], key=lambda x: x[2], reverse=True)[:top_n]
+        if matches[mention]:
+            logger.info(f"Found matches for mention '{mention}' with dynamic scoring.")
+        else:
+            logger.info(f"No matches found for mention '{mention}'.")
 
-            if not potential_matches.empty:
-                # Sort matches by similarity score and issue year
-                potential_matches = potential_matches.sort_values(by=['similarity', 'issue_year'], ascending=[False, False])
-                # Collect matches
-                for _, row in potential_matches.iterrows():
-                    matches[mention].append((row['Full Name'], row['Document_ID'], row['similarity']))
-                matches[mention] = matches[mention][:top_n]
-                logger.info(f"Found matches for mention '{mention}' using similarity search.")
-            else:
-                logger.info(f"No matches found for mention '{mention}'.")
         return matches
+
 
 
 
@@ -374,7 +383,7 @@ class DocRetriever:
 
 # Example usage
 if __name__ == "__main__":
-    searcher = DocRetriever("src\data\doc_db_aggregated.csv")
-    query = "luật tiêu dùng"
+    searcher = CombinedDocumentSearch("src\data\doc_db_aggregated.csv")
+    query = "Việc lập di chúc đều dựa trên mong muốn của chính người lập di chúc, tuy nhiên, vẫn tồn tại những trường hợp thay đổi hoặc huỷ bỏ di chúc đã được xác lập vì nhiều lí do khác nhau và dựa trên ý chỉ của chủ thể.\n\nNgười lập di chúc có thể sửa đổi, bổ sung di chúc bất kỳ lúc nào? Theo khoản 1 Điều 640 Bộ luật dân sự 2015, người lập di chúc có thể sửa đổi, bổ sung, thay thế, huỷ bỏ di chúc đã lập vào bất cứ lúc nào.\n\nNếu một người lập nhiều di chúc thì bản di chúc nào sẽ có hiệu lực pháp luật? Căn cứ tại khoản 5 Điều 643 Bộ luật Dân sự 2015 quy định về hiệu lực của di chúc thì khi một người để lại nhiều bản di chúc đối với một tài sản thì chỉ bản di chúc sau cùng có hiệu lực.\n\nCông chứng di chúc được sửa đổi. Căn cứ theo khoản 3 Điều 56 Luật Công chứng 2014 quy định về công chứng di chúc như sau: “Điều 56. Công chứng di chúc...”\n\nHồ sơ cần chuẩn bị cho việc thay đổi hoặc huỷ bỏ di chúc. Dự thảo di chúc hoặc bản di chúc đã lập trước đó (di chúc cần sửa đổi, bổ sung). Phiếu yêu cầu công chứng trong đó nêu rõ yêu cầu lập di chúc mới hay sửa đổi, bổ sung di chúc đã lập. Giấy tờ cá nhân của người lập/sửa đổi di chúc và người được hưởng thừa kế theo di chúc.."
     results = searcher.search(query, fuzzy=False)
     print(results)

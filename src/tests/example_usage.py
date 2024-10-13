@@ -3,14 +3,16 @@
 import logging
 import json
 from typing import List, Optional
-
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.load_config import load_config
 from utils.record import Record
 from utils.llm_formatter import LLMFormatter
 from tasks.preprocessing import Preprocessor
 
 def main():
-    config = load_config('config/config.yaml')
+    config = load_config('src/config/config.yaml')
     formatter = LLMFormatter(config=config)
     # Example 1: Tagged Record with Prefixed ID
     tagged_record = """
