@@ -375,6 +375,7 @@ class DocRetriever:
 # Example usage
 if __name__ == "__main__":
     searcher = DocRetriever("src\data\doc_db_aggregated.csv")
-    query = "luật tiêu dùng"
+    query = "bộ luật dân sự."
+    
     results = searcher.search(query, fuzzy=False)
     print(results)

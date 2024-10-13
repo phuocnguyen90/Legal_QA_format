@@ -1,3 +1,4 @@
+# WIP dynamic weighting for doc match
 import os
 import logging
 import pandas as pd
@@ -7,30 +8,27 @@ from sklearn.metrics.pairwise import cosine_similarity
 from collections import defaultdict
 from difflib import SequenceMatcher, get_close_matches
 import underthesea
-from underthesea import word_tokenize  # Replace with appropriate tokenizer if needed
+from underthesea import word_tokenize 
 import pickle
 from typing import List, Tuple, Dict
 from fuzzywuzzy import fuzz
 
-
 # Configure logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def compute_tfidf_similarity(query, documents):
-    vectorizer = TfidfVectorizer().fit(documents)
+def compute_tfidf_similarity(query, documents, stop_words=None):
+    vectorizer = TfidfVectorizer(stop_words=stop_words).fit(documents)
     query_vec = vectorizer.transform([query])
     doc_vecs = vectorizer.transform(documents)
     sims = cosine_similarity(query_vec, doc_vecs).flatten()
     return sims
 
-def compute_similarity(query_text, document_text):
-    # Use your preferred similarity measure, e.g., cosine similarity with TF-IDF
-    vectorizer = TfidfVectorizer().fit([query_text, document_text])
+def compute_similarity(query_text, document_text, stop_words=None):
+    vectorizer = TfidfVectorizer(stop_words=stop_words).fit([query_text, document_text])
     vectors = vectorizer.transform([query_text, document_text])
     similarity = cosine_similarity(vectors[0], vectors[1])[0][0]
     return similarity
-
 
 class CombinedDocumentSearch:
     def __init__(self, csv_path: str, token_db_path: str = 'src/data/token_db.pkl'):
@@ -42,6 +40,12 @@ class CombinedDocumentSearch:
         """
         self.csv_path = csv_path
         self.token_db_path = token_db_path
+        self.stopwords = {
+            'quy định', 'ban hành',  
+            'và', 'về', 'đối với', 'của', 'do', 'các',
+            'trong',      
+            'thuộc', '2020' 
+        }
         self.documents = self.load_documents()
         self.token_db = None
         self._load_or_create_token_database()
@@ -101,7 +105,6 @@ class CombinedDocumentSearch:
             logger.error(f"Error loading documents from {self.csv_path}: {e}")
             raise
 
-
     def _load_or_create_token_database(self):
         """
         Load or create the token database using TF-IDF.
@@ -118,8 +121,7 @@ class CombinedDocumentSearch:
                 pickle.dump(self.token_db, f)
             logger.info("Token database created and saved.")
 
-    @staticmethod
-    def create_token_database(documents, apply_tfidf=False):
+    def create_token_database(self, documents, apply_tfidf=False):
         """
         Create a token frequency database from documents with optional TF-IDF weighting.
         
@@ -127,10 +129,15 @@ class CombinedDocumentSearch:
         :param apply_tfidf: Whether to apply TF-IDF weighting.
         :return: Token frequency or TF-IDF scores dictionary.
         """
-        tokenized_docs = [' '.join(word_tokenize(doc.lower())) for doc in documents]
+        # Tokenize and remove stopwords
+        tokenized_docs = []
+        for doc in documents:
+            tokens = word_tokenize(doc.lower())
+            filtered_tokens = [token for token in tokens if token not in self.stopwords]
+            tokenized_docs.append(' '.join(filtered_tokens))
         
         if apply_tfidf:
-            vectorizer = TfidfVectorizer()
+            vectorizer = TfidfVectorizer(stop_words=list(self.stopwords))  # Convert set to list
             tfidf_matrix = vectorizer.fit_transform(tokenized_docs)
             feature_names = vectorizer.get_feature_names_out()
             
@@ -154,7 +161,7 @@ class CombinedDocumentSearch:
         for mention_dict in extracted_mentions:
             mention = mention_dict['mention']
             document_type = mention_dict['document_type']
-            document_number = mention_dict['document_number']  # Add this line
+            document_number = mention_dict['document_number']  
             issue_year = mention_dict['issue_year']
             issuer_body = mention_dict['issuer_body']
             extra_info = mention_dict['extra_info']
@@ -162,7 +169,7 @@ class CombinedDocumentSearch:
             mention_matches = self.match_documents(
                 mention, 
                 document_type,
-                document_number,     # Add this argument
+                document_number,     
                 issue_year,
                 issuer_body,
                 extra_info,
@@ -181,64 +188,90 @@ class CombinedDocumentSearch:
 
         return matches
 
-
-
     def extract_document_mentions(self, text: str) -> List[Dict[str, str]]:
         mentions = []
-        # Use sentence tokenizer
+        # Split text into sentences
         sentences = underthesea.sent_tokenize(text)
         logger.debug(f"Sentences after tokenization: {sentences}")
 
+        # Define mention keywords
+        first_group_keywords = ['luật', 'bộ luật', 'pháp lệnh']
+        other_keywords = ['nghị định', 'thông tư', 'nghị quyết', 'quyết định']
+        all_keywords = first_group_keywords + other_keywords
 
-        pattern = re.compile(
-            r"(?P<document_type>Luật|Bộ luật|Pháp lệnh|Nghị định|Thông tư(?: liên tịch)?|Nghị quyết|Quyết định)"
-            r"(?:\s+(?P<document_number>\d{1,4}))?"
-            r"(?:\s+(?P<document_subtype>Luật|Bộ luật|Pháp lệnh))?"
-            r"(?:\s+(?P<extra_info>.+?))?"
-            r"(?:\s+(?P<issue_year>\d{4}))?",
-            re.UNICODE | re.IGNORECASE
-        )
+        # Preprocess keywords to handle multi-word phrases
+        keyword_max_length = max(len(k.split()) for k in all_keywords)
 
         for sentence in sentences:
             sentence = sentence.strip()
             if not sentence:
                 continue
-            # Search for all matches in the sentence
-            for match in pattern.finditer(sentence):
-                document_type = match.group("document_type").strip().lower() if match.group("document_type") else ""
-                document_number = match.group("document_number").strip() if match.group("document_number") else ""
-                document_subtype = match.group("document_subtype").strip().lower() if match.group("document_subtype") else ""
-                issue_year = match.group("issue_year").strip() if match.group("issue_year") else ""
-                extra_info = match.group("extra_info").strip() if match.group("extra_info") else ""
+            # Tokenize the sentence using whitespace
+            tokens = sentence.split()
+            logger.debug(f"Tokens: {tokens}")
+            i = 0
+            while i < len(tokens):
+                # Function to match keywords considering multi-word phrases
+                def get_matching_keyword(tokens, i, keywords):
+                    for length in range(keyword_max_length, 0, -1):
+                        if i + length <= len(tokens):
+                            phrase = ' '.join(tokens[i:i+length]).lower()
+                            if phrase in keywords:
+                                return phrase, length
+                    return None, 0
 
-                # Build mention text
-                mention_text = match.group(0).strip()
-
-                # Determine the issuer body if present in extra info
-                issuer_body = ""
-                for body, abbrev in self.issuer_mapping.items():
-                    if body in extra_info.lower():
-                        issuer_body = abbrev
-                        # Remove the identified issuer body from extra_info
-                        extra_info = extra_info.replace(body, "").strip()
-
-                # Adjust document type if document_subtype is present
-                if document_subtype:
-                    document_type += f" {document_subtype}"
-
-                mentions.append({
-                    'mention': mention_text,
-                    'document_type': document_type,
-                    'document_number': document_number,
-                    'issue_year': issue_year,
-                    'issuer_body': issuer_body,
-                    'extra_info': extra_info
-                })
-                logger.debug(f"Extracted mention: {mentions[-1]}")
-
+                # Try to match any keyword starting at position i
+                keyword, keyword_length = get_matching_keyword(tokens, i, all_keywords)
+                if keyword:
+                    # Start building the mention
+                    mention_tokens = tokens[i:i+keyword_length]
+                    count = 0
+                    j = i + keyword_length
+                    # Take at least the next 3 tokens, unless an exception applies
+                    while j < len(tokens) and count < 3:
+                        next_keyword, _ = get_matching_keyword(tokens, j, all_keywords)
+                        if next_keyword:
+                            break
+                        mention_tokens.append(tokens[j])
+                        count += 1
+                        j += 1
+                    # After initial tokens, collect up to 3 tokens for extra_info
+                    extra_info_count = 0
+                    while j < len(tokens) and extra_info_count < 3:
+                        next_keyword, _ = get_matching_keyword(tokens, j, all_keywords)
+                        if next_keyword:
+                            break
+                        mention_tokens.append(tokens[j])
+                        extra_info_count += 1
+                        j += 1
+                    # Create the mention text
+                    mention_text = ' '.join(mention_tokens)
+                    # Extract extra_info (tokens after the document_type)
+                    extra_info = ' '.join(mention_tokens[keyword_length:])
+                    # Try to extract issue_year from tokens
+                    issue_year = ''
+                    for t in tokens[i:j]:
+                        if re.match(r'\b\d{4}\b', t):
+                            issue_year = t
+                            break
+                    # Remove issue_year from extra_info if present
+                    if issue_year and issue_year in extra_info:
+                        extra_info = extra_info.replace(issue_year, '').strip()
+                    mentions.append({
+                        'mention': mention_text,
+                        'document_type': keyword,
+                        'document_number': '',
+                        'issue_year': issue_year,
+                        'issuer_body': '',
+                        'extra_info': extra_info
+                    })
+                    logger.debug(f"Extracted mention: {mentions[-1]}")
+                    i = j  # Continue from where we left off
+                else:
+                    i += 1  # Move to the next token
+            # End of sentence processing
         logger.info(f"Extracted mentions with detailed info: {mentions}")
         return mentions
-
 
     def match_documents(
         self, 
@@ -325,7 +358,7 @@ class CombinedDocumentSearch:
 
             # Compute similarity for extra_info
             if extra_info:
-                similarity = compute_similarity(extra_info.lower(), doc['Full Name'].lower())
+                similarity = compute_similarity(extra_info.lower(), doc['Full Name'].lower(), stop_words=list(self.stopwords))  # Convert set to list
                 match_score += dynamic_weights['extra_info'] * similarity
 
             # Add match to results if score exceeds cutoff
@@ -341,9 +374,6 @@ class CombinedDocumentSearch:
 
         return matches
 
-
-
-
     def calculate_matching_score(self, doc: pd.Series, mention: str) -> float:
         """
         Calculate the matching score for a document based on title similarity, issue year, and other criteria.
@@ -354,7 +384,6 @@ class CombinedDocumentSearch:
         """
         # This method is now integrated into match_documents and can be removed or repurposed
         pass  # Placeholder if needed for future enhancements
-
 
     def extract_issue_year_from_mention(self, mention: str) -> str:
         """
@@ -381,9 +410,29 @@ class CombinedDocumentSearch:
         
         return extracted_year
 
+    def analyze_token_database(self):
+        """
+        Analyze the token database to find common tokens to exclude.
+        """
+        # Ensure the token database is loaded
+        self._load_or_create_token_database()
+
+        # Assuming self.token_db is a dictionary {token: score}
+        # Sort tokens by their TF-IDF scores in descending order
+        sorted_tokens = sorted(self.token_db.items(), key=lambda item: item[1], reverse=True)
+
+        # Print or log the top N tokens
+        top_n = 100  # Adjust N as needed
+        logger.info(f"Top {top_n} tokens by TF-IDF scores:")
+        for token, score in sorted_tokens[:top_n]:
+            print(f"{token}: {score}")
+
 # Example usage
 if __name__ == "__main__":
-    searcher = CombinedDocumentSearch("src\data\doc_db_aggregated.csv")
-    query = "Việc lập di chúc đều dựa trên mong muốn của chính người lập di chúc, tuy nhiên, vẫn tồn tại những trường hợp thay đổi hoặc huỷ bỏ di chúc đã được xác lập vì nhiều lí do khác nhau và dựa trên ý chỉ của chủ thể.\n\nNgười lập di chúc có thể sửa đổi, bổ sung di chúc bất kỳ lúc nào? Theo khoản 1 Điều 640 Bộ luật dân sự 2015, người lập di chúc có thể sửa đổi, bổ sung, thay thế, huỷ bỏ di chúc đã lập vào bất cứ lúc nào.\n\nNếu một người lập nhiều di chúc thì bản di chúc nào sẽ có hiệu lực pháp luật? Căn cứ tại khoản 5 Điều 643 Bộ luật Dân sự 2015 quy định về hiệu lực của di chúc thì khi một người để lại nhiều bản di chúc đối với một tài sản thì chỉ bản di chúc sau cùng có hiệu lực.\n\nCông chứng di chúc được sửa đổi. Căn cứ theo khoản 3 Điều 56 Luật Công chứng 2014 quy định về công chứng di chúc như sau: “Điều 56. Công chứng di chúc...”\n\nHồ sơ cần chuẩn bị cho việc thay đổi hoặc huỷ bỏ di chúc. Dự thảo di chúc hoặc bản di chúc đã lập trước đó (di chúc cần sửa đổi, bổ sung). Phiếu yêu cầu công chứng trong đó nêu rõ yêu cầu lập di chúc mới hay sửa đổi, bổ sung di chúc đã lập. Giấy tờ cá nhân của người lập/sửa đổi di chúc và người được hưởng thừa kế theo di chúc.."
+    # Use raw string for Windows paths or forward slashes
+    searcher = CombinedDocumentSearch(r"src\data\doc_db_aggregated.csv")
+    # Example query
+    query = "Căn cứ theo khoản 3 Điều 56 luật về hôn nhân quy định về công chứng di chúc như sau: Điều 56. Công chứng di chúc...."
     results = searcher.search(query, fuzzy=False)
     print(results)
+    # searcher.analyze_token_database()
